@@ -73,6 +73,7 @@ CMakeLists.txt.user*
 # --------
 *.dll
 *.exe
+*.exec
 
 # Directories with generated files
 .moc/
@@ -82,3 +83,8 @@ CMakeLists.txt.user*
 .uic/
 /build*/
 /.qtcreator/
+
+# Doxygen documentation
+docs/html
+docs/xml
+docs/latex/
