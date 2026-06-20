@@ -11,11 +11,15 @@ qt_add_executable(Notepad
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
-    pagetextedit.cpp
-    pagetextedit.h
+    pagedocumentitem.cpp
+    pagedocumentitem.h
     iconfactory.h
     canvasview.cpp
     canvasview.h
+    findbar.cpp
+    findbar.h
+    pagesetupdialog.cpp
+    pagesetupdialog.h
 )
 
 qt_add_translations(

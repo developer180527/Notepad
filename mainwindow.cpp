@@ -2,8 +2,10 @@
 #include "ui_mainwindow.h"
 
 #include "canvasview.h"
+#include "findbar.h"
 #include "iconfactory.h"
-#include "pagetextedit.h"
+#include "pagedocumentitem.h"
+#include "pagesetupdialog.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -18,7 +20,6 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QFontComboBox>
-#include <QGraphicsProxyWidget>
 #include <QGraphicsScene>
 #include <QImage>
 #include <QLabel>
@@ -43,6 +44,8 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
+#include <QVBoxLayout>
+#include <QWidget>
 
 #include <cmath>
 
@@ -63,6 +66,7 @@ MainWindow::MainWindow(QWidget *parent)
     setupStatusBar();
     connectActions();
     refreshIcons();
+    applyPageSetup();
 
     // Base font from the system default; size combo + zoom layer on top of it.
     m_baseFontFamily = m_editor->document()->defaultFont().family();
@@ -76,7 +80,6 @@ MainWindow::MainWindow(QWidget *parent)
     setZoom(100);
     updateWordCount();
     updatePageLabel();
-    m_pageProxy->setFocus();
     m_editor->setFocus();
     statusBar()->showMessage(tr("Ready"), 2000);
 }
@@ -90,31 +93,39 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupEditorArea()
 {
-    // The page is a fixed-size sheet living in a scene; the view is the canvas
-    // the user zooms (a smooth view transform) and pans. No graphics effect on
-    // the editor — that was the source of the scrolling glitches/memory growth.
-    m_editor = new PageTextEdit;            // owned by the proxy/scene
-    m_editor->setPageWidthPx(kA4WidthPx);   // fixed A4 width, never tracks the window
+    // Data and visuals are separate: one QTextDocument (inside the item) is the
+    // model; the item renders it as fixed A4 sheets on the canvas. The view is a
+    // QGraphicsView the user zooms (a view transform) and pans — no proxy widget.
+    m_editor = new PageDocumentItem();      // owned by the scene once added
 
     m_scene = new QGraphicsScene(this);
-    m_pageProxy = m_scene->addWidget(m_editor);
-    m_pageProxy->setPos(0, 0);
+    m_scene->addItem(m_editor);
+    m_editor->setPos(0, 0);
 
     m_view = new CanvasView(this);
     m_view->setScene(m_scene);
-    m_view->setPageItem(m_pageProxy);
-    setCentralWidget(m_view);
+
+    m_findBar = new FindBar(this);
+    m_findBar->hide();
+
+    auto *central = new QWidget(this);
+    auto *centralLayout = new QVBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_findBar);
+    centralLayout->addWidget(m_view, 1);
+    setCentralWidget(central);
 
     updateSceneRect();
 }
 
 void MainWindow::updateSceneRect()
 {
-    if (!m_scene || !m_pageProxy)
+    if (!m_scene || !m_editor)
         return;
-    // Pad generously around the page so it can be panned freely on the canvas.
+    // Pad generously around the pages so they can be panned freely on the canvas.
     const qreal pad = 260.0;
-    m_scene->setSceneRect(m_pageProxy->geometry().adjusted(-pad, -pad, pad, pad));
+    m_scene->setSceneRect(m_editor->boundingRect().adjusted(-pad, -pad, pad, pad));
 }
 
 void MainWindow::setupToolBar()
@@ -231,21 +242,48 @@ void MainWindow::connectActions()
     connect(ui->actionQuit, &QAction::triggered, this, &QWidget::close);
 
     // Edit
-    connect(ui->actionUndo, &QAction::triggered, m_editor, &QTextEdit::undo);
-    connect(ui->actionRedo, &QAction::triggered, m_editor, &QTextEdit::redo);
-    connect(ui->actionCut, &QAction::triggered, m_editor, &QTextEdit::cut);
-    connect(ui->actionCopy, &QAction::triggered, m_editor, &QTextEdit::copy);
-    connect(ui->actionPaste, &QAction::triggered, m_editor, &QTextEdit::paste);
-    connect(ui->actionSelectAll, &QAction::triggered, m_editor, &QTextEdit::selectAll);
+    connect(ui->actionUndo, &QAction::triggered, m_editor, &PageDocumentItem::undo);
+    connect(ui->actionRedo, &QAction::triggered, m_editor, &PageDocumentItem::redo);
+    connect(ui->actionCut, &QAction::triggered, m_editor, &PageDocumentItem::cut);
+    connect(ui->actionCopy, &QAction::triggered, m_editor, &PageDocumentItem::copy);
+    connect(ui->actionPaste, &QAction::triggered, m_editor, &PageDocumentItem::paste);
+    connect(ui->actionSelectAll, &QAction::triggered, m_editor, &PageDocumentItem::selectAll);
 
-    connect(m_editor, &QTextEdit::undoAvailable, ui->actionUndo, &QAction::setEnabled);
-    connect(m_editor, &QTextEdit::redoAvailable, ui->actionRedo, &QAction::setEnabled);
-    connect(m_editor, &QTextEdit::copyAvailable, ui->actionCut, &QAction::setEnabled);
-    connect(m_editor, &QTextEdit::copyAvailable, ui->actionCopy, &QAction::setEnabled);
+    connect(m_editor, &PageDocumentItem::undoAvailable, ui->actionUndo, &QAction::setEnabled);
+    connect(m_editor, &PageDocumentItem::redoAvailable, ui->actionRedo, &QAction::setEnabled);
+    connect(m_editor, &PageDocumentItem::selectionAvailable, ui->actionCut, &QAction::setEnabled);
+    connect(m_editor, &PageDocumentItem::selectionAvailable, ui->actionCopy, &QAction::setEnabled);
     ui->actionUndo->setEnabled(false);
     ui->actionRedo->setEnabled(false);
     ui->actionCut->setEnabled(false);
     ui->actionCopy->setEnabled(false);
+
+    // Find / replace
+    connect(ui->actionFind, &QAction::triggered, this, [this] { m_findBar->activate(); });
+    connect(ui->actionPageSetup, &QAction::triggered, this, &MainWindow::openPageSetup);
+
+    auto findFlags = [](bool forward, bool cs, bool whole) {
+        QTextDocument::FindFlags f;
+        if (!forward) f |= QTextDocument::FindBackward;
+        if (cs)       f |= QTextDocument::FindCaseSensitively;
+        if (whole)    f |= QTextDocument::FindWholeWords;
+        return f;
+    };
+    connect(m_findBar, &FindBar::findRequested, this,
+            [this, findFlags](const QString &text, bool fwd, bool cs, bool whole) {
+                if (!m_editor->find(text, findFlags(fwd, cs, whole)) && !text.isEmpty())
+                    statusBar()->showMessage(tr("Not found: %1").arg(text), 2000);
+            });
+    connect(m_findBar, &FindBar::replaceRequested, this,
+            [this, findFlags](const QString &text, const QString &with, bool cs, bool whole) {
+                m_editor->replaceSelection(text, with, findFlags(true, cs, whole));
+            });
+    connect(m_findBar, &FindBar::replaceAllRequested, this,
+            [this, findFlags](const QString &text, const QString &with, bool cs, bool whole) {
+                const int n = m_editor->replaceAll(text, with, findFlags(true, cs, whole));
+                statusBar()->showMessage(tr("Replaced %n occurrence(s)", nullptr, n), 2500);
+            });
+    connect(m_findBar, &FindBar::closed, this, [this] { m_editor->setFocus(); });
 
     // Insert
     connect(ui->actionInsertImage, &QAction::triggered, this, &MainWindow::insertImage);
@@ -267,13 +305,13 @@ void MainWindow::connectActions()
         mergeFormatOnSelection(fmt);
     });
     connect(ui->actionAlignLeft, &QAction::triggered, this,
-            [this] { m_editor->setAlignment(Qt::AlignLeft); });
+            [this] { m_editor->setAlignmentValue(Qt::AlignLeft); });
     connect(ui->actionAlignCenter, &QAction::triggered, this,
-            [this] { m_editor->setAlignment(Qt::AlignHCenter); });
+            [this] { m_editor->setAlignmentValue(Qt::AlignHCenter); });
     connect(ui->actionAlignRight, &QAction::triggered, this,
-            [this] { m_editor->setAlignment(Qt::AlignRight); });
+            [this] { m_editor->setAlignmentValue(Qt::AlignRight); });
     connect(ui->actionAlignJustify, &QAction::triggered, this,
-            [this] { m_editor->setAlignment(Qt::AlignJustify); });
+            [this] { m_editor->setAlignmentValue(Qt::AlignJustify); });
 
     connect(m_fontCombo, &QFontComboBox::currentFontChanged, this,
             &MainWindow::onFontFamilyChanged);
@@ -283,11 +321,8 @@ void MainWindow::connectActions()
     connect(ui->actionZoomIn, &QAction::triggered, this, [this] { setZoom(m_zoom + 10); });
     connect(ui->actionZoomOut, &QAction::triggered, this, [this] { setZoom(m_zoom - 10); });
     connect(ui->actionResetZoom, &QAction::triggered, this, [this] { setZoom(100); });
-    connect(ui->actionWordWrap, &QAction::toggled, this, [this](bool on) {
-        m_editor->setLineWrapMode(on ? QTextEdit::WidgetWidth : QTextEdit::NoWrap);
-        m_editor->setHorizontalScrollBarPolicy(on ? Qt::ScrollBarAlwaysOff
-                                                  : Qt::ScrollBarAsNeeded);
-    });
+    // Text always wraps to the fixed page width, so word-wrap toggling is moot.
+    ui->actionWordWrap->setVisible(false);
     connect(m_zoomCombo, &QComboBox::textActivated, this, [this](const QString &t) {
         QString digits = t;
         digits.remove(QLatin1Char('%'));
@@ -325,17 +360,18 @@ void MainWindow::connectActions()
     // Editor state -> UI
     connect(m_editor->document(), &QTextDocument::modificationChanged, this,
             &QWidget::setWindowModified);
-    connect(m_editor, &QTextEdit::textChanged, this, &MainWindow::updateWordCount);
-    connect(m_editor, &PageTextEdit::pageCountChanged, this, [this](int) {
+    connect(m_editor, &PageDocumentItem::contentsChanged, this, &MainWindow::updateWordCount);
+    connect(m_editor, &PageDocumentItem::pageCountChanged, this, [this](int) {
         updateSceneRect();
         updatePageLabel();
     });
-    connect(m_editor, &QTextEdit::currentCharFormatChanged, this,
-            [this](const QTextCharFormat &) { syncFormatControls(); });
-    connect(m_editor, &QTextEdit::cursorPositionChanged, this, [this] {
+    connect(m_editor, &PageDocumentItem::cursorPositionChanged, this, [this] {
         syncFormatControls();
         updatePageLabel();
-        ensureCursorVisibleInScroll();
+    });
+    connect(m_editor, &PageDocumentItem::ensureVisibleRequested, this, [this](const QRectF &r) {
+        if (m_view)
+            m_view->ensureVisible(r, 24, 48);
     });
 }
 
@@ -371,7 +407,8 @@ void MainWindow::newFile()
 {
     if (!maybeSave())
         return;
-    m_editor->clear();
+    m_editor->document()->clear();
+    m_editor->documentReset();
     setCurrentFile(QString());
     updateWordCount();
 }
@@ -444,9 +481,9 @@ bool MainWindow::writeToFile(const QString &path)
     if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"))
         out = m_editor->document()->toMarkdown().toUtf8();
     else if (suffix == QLatin1String("html") || suffix == QLatin1String("htm"))
-        out = m_editor->toHtml().toUtf8();
+        out = m_editor->document()->toHtml().toUtf8();
     else
-        out = m_editor->toPlainText().toUtf8();
+        out = m_editor->document()->toPlainText().toUtf8();
     file.write(out);
     file.close();
 
@@ -474,10 +511,11 @@ bool MainWindow::loadFromFile(const QString &path)
     if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"))
         m_editor->document()->setMarkdown(text);
     else if (suffix == QLatin1String("html") || suffix == QLatin1String("htm"))
-        m_editor->setHtml(text);
+        m_editor->document()->setHtml(text);
     else
-        m_editor->setPlainText(text);
+        m_editor->document()->setPlainText(text);
 
+    m_editor->documentReset();
     m_editor->document()->setModified(false);
     updateWordCount();
     return true;
@@ -530,7 +568,7 @@ bool MainWindow::writeNote(const QString &path)
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_6_5);
     out << QByteArray(kNoteMagic) << kNoteVersion;
-    out << m_editor->toHtml();
+    out << m_editor->document()->toHtml();
     out << static_cast<quint32>(images.size());
     for (const auto &img : images)
         out << img.first << img.second;
@@ -575,7 +613,8 @@ bool MainWindow::readNote(const QString &path)
     }
     file.close();
 
-    m_editor->setHtml(html);
+    m_editor->document()->setHtml(html);
+    m_editor->documentReset();
     m_editor->document()->setModified(false);
     updateWordCount();
     return true;
@@ -640,10 +679,7 @@ void MainWindow::mergeFormatOnSelection(const QTextCharFormat &format)
 {
     if (m_updatingControls)
         return;
-    QTextCursor cursor = m_editor->textCursor();
-    if (cursor.hasSelection())
-        cursor.mergeCharFormat(format);
-    m_editor->mergeCurrentCharFormat(format);
+    m_editor->mergeFormatOnSelection(format);
     m_editor->setFocus();
 }
 
@@ -651,15 +687,8 @@ void MainWindow::onFontFamilyChanged(const QFont &font)
 {
     if (m_updatingControls)
         return;
-    QTextCursor cursor = m_editor->textCursor();
-    if (cursor.hasSelection()) {
-        QTextCharFormat fmt;
-        fmt.setFontFamilies({font.family()});
-        mergeFormatOnSelection(fmt);
-    } else {
-        m_baseFontFamily = font.family();
-        applyBaseFont();
-    }
+    m_baseFontFamily = font.family();
+    applyBaseFont();
     m_editor->setFocus();
 }
 
@@ -671,26 +700,19 @@ void MainWindow::onFontSizeChanged(const QString &text)
     const qreal pt = text.trimmed().toDouble(&ok);
     if (!ok || pt <= 0)
         return;
-    QTextCursor cursor = m_editor->textCursor();
-    if (cursor.hasSelection()) {
-        QTextCharFormat fmt;
-        fmt.setFontPointSize(pt);
-        mergeFormatOnSelection(fmt);
-    } else {
-        m_baseFontSize = pt;
-        applyBaseFont();
-    }
+    m_baseFontSize = pt;
+    applyBaseFont();
     m_editor->setFocus();
 }
 
 void MainWindow::applyBaseFont()
 {
-    // Zoom is handled by the canvas view transform, so the document's own font
-    // stays at its true point size (no rescaling on zoom).
+    // Font family/size set the document's base font (whole document). Zoom is a
+    // separate canvas transform, so the point size stays true.
     QFont f(m_baseFontFamily.isEmpty() ? m_editor->document()->defaultFont().family()
                                        : m_baseFontFamily);
     f.setPointSizeF(m_baseFontSize);
-    m_editor->document()->setDefaultFont(f);
+    m_editor->setBaseFont(f);
 }
 
 void MainWindow::insertImage()
@@ -705,19 +727,8 @@ void MainWindow::insertImage()
         QMessageBox::warning(this, tr("PagePad"), tr("Could not load image %1.").arg(fn));
         return;
     }
-
-    const double maxW = m_editor->viewport()->width() - 2 * m_editor->document()->documentMargin();
-    if (maxW > 0 && img.width() > maxW)
-        img = img.scaledToWidth(static_cast<int>(maxW), Qt::SmoothTransformation);
-
-    const QString name = QStringLiteral("img://%1.png").arg(QDateTime::currentMSecsSinceEpoch());
-    m_editor->document()->addResource(QTextDocument::ImageResource, QUrl(name), img);
-
-    QTextImageFormat fmt;
-    fmt.setName(name);
-    fmt.setWidth(img.width());
-    fmt.setHeight(img.height());
-    m_editor->textCursor().insertImage(fmt);
+    m_editor->insertImage(img);
+    m_editor->setFocus();
 }
 
 void MainWindow::syncFormatControls()
@@ -740,7 +751,7 @@ void MainWindow::syncFormatControls()
     m_sizeCombo->setCurrentText(
         QString::number(pt > 0 ? qRound(pt) : qRound(m_baseFontSize)));
 
-    const Qt::Alignment al = m_editor->alignment();
+    const Qt::Alignment al = m_editor->alignmentValue();
     if (al & Qt::AlignHCenter)
         ui->actionAlignCenter->setChecked(true);
     else if (al & Qt::AlignRight)
@@ -786,36 +797,50 @@ void MainWindow::applyFitMode()
         setZoom(qRound((viewportW - 40) * 100.0 / pageW));
 }
 
+// ---------------------------------------------------------------- page setup
+
+void MainWindow::applyPageSetup()
+{
+    const QPageSize ps(m_paperId);
+    QSizeF sheetPx(ps.sizePixels(96));
+    if (m_orientation == QPageLayout::Landscape)
+        sheetPx.transpose();
+
+    const qreal pxPerMm = 96.0 / 25.4;
+    const QMarginsF marginsPx(m_marginsMm.left() * pxPerMm, m_marginsMm.top() * pxPerMm,
+                              m_marginsMm.right() * pxPerMm, m_marginsMm.bottom() * pxPerMm);
+    m_editor->setPageLayoutMetrics(sheetPx, marginsPx, 28.0);
+
+    updateSceneRect();
+    if (m_fitCombo && m_fitCombo->currentIndex() == 0)
+        applyFitMode();
+    updatePageLabel();
+}
+
+void MainWindow::openPageSetup()
+{
+    PageSetupDialog dialog(m_paperId, m_orientation, m_marginsMm, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_paperId = dialog.paperSize();
+    m_orientation = dialog.orientation();
+    m_marginsMm = dialog.marginsMm();
+    applyPageSetup();
+}
+
 // ---------------------------------------------------------------- status
 
 void MainWindow::updateWordCount()
 {
     static const QRegularExpression ws(QStringLiteral("\\s+"));
-    const QString text = m_editor->toPlainText().trimmed();
+    const QString text = m_editor->document()->toPlainText().trimmed();
     const int words = text.isEmpty() ? 0 : text.split(ws, Qt::SkipEmptyParts).size();
     m_wordLabel->setText(tr("Words: %1").arg(words));
 }
 
 void MainWindow::updatePageLabel()
 {
-    const int total = m_editor->pageCount();
-    const qreal ph = m_editor->pageHeightPx();
-    int current = 1;
-    if (ph > 0) {
-        const QRect cr = m_editor->cursorRect();
-        current = qBound(1, static_cast<int>(cr.top() / ph) + 1, total);
-    }
-    m_pageLabel->setText(tr("Page %1 of %2").arg(current).arg(total));
-}
-
-void MainWindow::ensureCursorVisibleInScroll()
-{
-    if (!m_pageProxy || !m_view)
-        return;
-    // Map the caret (page/widget coords) into the scene, then keep it in view.
-    const QRectF cr(m_editor->cursorRect());
-    const QRectF sceneRect = m_pageProxy->mapToScene(cr).boundingRect();
-    m_view->ensureVisible(sceneRect, 24, 48);
+    m_pageLabel->setText(tr("Page %1 of %2").arg(m_editor->currentPage()).arg(m_editor->pageCount()));
 }
 
 // ---------------------------------------------------------------- events

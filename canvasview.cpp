@@ -1,6 +1,5 @@
 #include "canvasview.h"
 
-#include <QGraphicsItem>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QPainter>
@@ -126,21 +125,4 @@ void CanvasView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
     QGraphicsView::mouseReleaseEvent(event);
-}
-
-void CanvasView::drawBackground(QPainter *painter, const QRectF &rect)
-{
-    QGraphicsView::drawBackground(painter, rect); // fills the canvas colour
-    if (!m_pageItem)
-        return;
-
-    // Cheap soft shadow behind the page (drawn before the item, no effect cost).
-    const QRectF pr = m_pageItem->sceneBoundingRect();
-    painter->save();
-    painter->setPen(Qt::NoPen);
-    for (int i = 6; i >= 1; --i) {
-        painter->setBrush(QColor(0, 0, 0, 7));
-        painter->drawRoundedRect(pr.adjusted(-i + 3, -i + 5, i + 3, i + 6), 2, 2);
-    }
-    painter->restore();
 }

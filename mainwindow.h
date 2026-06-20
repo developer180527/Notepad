@@ -2,12 +2,15 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QMarginsF>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QString>
 
-class PageTextEdit;
+class PageDocumentItem;
 class CanvasView;
+class FindBar;
 class QGraphicsScene;
-class QGraphicsProxyWidget;
 class QFontComboBox;
 class QComboBox;
 class QSlider;
@@ -71,17 +74,20 @@ private:
     void setZoom(int percent);
     void applyFitMode();
 
+    // --- find / page setup ---
+    void openPageSetup();
+    void applyPageSetup();
+
     // --- status ---
     void updateWordCount();
     void updatePageLabel();
-    void ensureCursorVisibleInScroll();
 
     Ui::MainWindow *ui;
 
-    PageTextEdit *m_editor = nullptr;
+    PageDocumentItem *m_editor = nullptr;
     CanvasView *m_view = nullptr;
     QGraphicsScene *m_scene = nullptr;
-    QGraphicsProxyWidget *m_pageProxy = nullptr;
+    FindBar *m_findBar = nullptr;
 
     QFontComboBox *m_fontCombo = nullptr;
     QComboBox *m_sizeCombo = nullptr;
@@ -99,7 +105,11 @@ private:
     int m_zoom = 100;
     bool m_updatingControls = false;
 
-    static constexpr int kA4WidthPx = 794;     // 210mm @ 96dpi, matches PageTextEdit
+    QPageSize::PageSizeId m_paperId = QPageSize::A4;
+    QPageLayout::Orientation m_orientation = QPageLayout::Portrait;
+    QMarginsF m_marginsMm{25, 25, 25, 25};
+
+    static constexpr int kA4WidthPx = 794;     // 210mm @ 96dpi, matches PageDocumentItem
 };
 
 #endif // MAINWINDOW_H

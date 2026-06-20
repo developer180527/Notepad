@@ -22,6 +22,7 @@
     <addaction name="actionSave"/>
     <addaction name="actionSaveAs"/>
     <addaction name="separator"/>
+    <addaction name="actionPageSetup"/>
     <addaction name="actionExportPdf"/>
     <addaction name="separator"/>
     <addaction name="actionQuit"/>
@@ -36,6 +37,8 @@
     <addaction name="actionPaste"/>
     <addaction name="separator"/>
     <addaction name="actionSelectAll"/>
+    <addaction name="separator"/>
+    <addaction name="actionFind"/>
    </widget>
    <widget class="QMenu" name="menuInsert">
     <property name="title"><string>&amp;Insert</string></property>
@@ -91,6 +94,13 @@
   </action>
   <action name="actionExportPdf">
    <property name="text"><string>Export as &amp;PDF...</string></property>
+  </action>
+  <action name="actionPageSetup">
+   <property name="text"><string>Page Set&amp;up...</string></property>
+  </action>
+  <action name="actionFind">
+   <property name="text"><string>&amp;Find / Replace...</string></property>
+   <property name="shortcut"><string>Ctrl+F</string></property>
   </action>
   <action name="actionQuit">
    <property name="text"><string>&amp;Quit</string></property>
