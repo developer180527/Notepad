@@ -64,6 +64,14 @@ MainWindow::MainWindow(QWidget *parent)
     // Render the menu bar inside the window (above the toolbar) on every
     // platform, instead of macOS's global menu bar — matches the design.
     ui->menubar->setNativeMenuBar(false);
+    // Roomier, bolder, slightly lowered menu items. rgba hover works in both
+    // light and dark themes; text colour is inherited so it adapts too.
+    ui->menubar->setStyleSheet(QStringLiteral(
+        "QMenuBar { padding: 6px 8px 4px 8px; font-size: 15px; font-weight: bold; }"
+        "QMenuBar::item { padding: 6px 8px; margin: 0px 4px; background: transparent;"
+        " border-radius: 6px; }"
+        "QMenuBar::item:selected { background: rgba(128,128,128,0.28); }"
+        "QMenuBar::item:pressed { background: rgba(128,128,128,0.40); }"));
 
     setupEditorArea();
     applyCanvasTheme();

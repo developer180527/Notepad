@@ -1,223 +1,132 @@
 #ifndef ICONFACTORY_H
 #define ICONFACTORY_H
 
-// Self-contained, theme-adaptive toolbar icons drawn with QPainter.
-// No .qrc resources, no external image files: every icon is rendered as a
-// vector in a single colour (typically the palette text colour) so it reads
-// correctly in both light and dark themes. Re-create the icons whenever the
-// application palette changes to recolour them.
+// Toolbar icons from the Lucide icon set (https://lucide.dev, ISC/MIT licence).
+// The SVG markup is embedded inline — no asset files — rendered with
+// QSvgRenderer and stroked in a caller-supplied colour (the palette text
+// colour) so the icons adapt to light/dark themes. Re-create the icons on a
+// palette change to recolour them.
 
+#include <QByteArray>
 #include <QColor>
-#include <QFont>
 #include <QIcon>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPixmap>
-#include <QPointF>
-#include <QPolygonF>
-#include <QRectF>
-
-#include <cmath>
+#include <QString>
+#include <QSvgRenderer>
 
 namespace IconFactory {
 
-// Everything is drawn on a 64x64 logical canvas and handed to QIcon, which
-// scales it smoothly to whatever size the toolbar requests.
-inline constexpr int kCanvas = 64;
-
-inline QPixmap beginPixmap(QPainter &p)
+// Render Lucide's inner markup (paths/lines on a 24x24 grid) into a tinted icon.
+inline QIcon svgIcon(const QString &inner, const QColor &color, int size = 64)
 {
-    QPixmap pm(kCanvas, kCanvas);
+    const QString svg = QStringLiteral(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' "
+        "viewBox='0 0 24 24' fill='none' stroke='%1' stroke-width='2' "
+        "stroke-linecap='round' stroke-linejoin='round'>%2</svg>")
+        .arg(color.name(), inner);
+
+    QSvgRenderer renderer(svg.toUtf8());
+    QPixmap pm(size, size);
     pm.fill(Qt::transparent);
-    p.begin(&pm);
+    QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.setRenderHint(QPainter::TextAntialiasing, true);
-    return pm;
-}
-
-inline QPen strokePen(const QColor &c, qreal width = 5.0)
-{
-    QPen pen(c);
-    pen.setWidthF(width);
-    pen.setCapStyle(Qt::RoundCap);
-    pen.setJoinStyle(Qt::RoundJoin);
-    return pen;
-}
-
-// A filled triangular arrowhead with its tip at `tip`, pointing in `dir`
-// (a unit-ish direction), drawn at the current brush colour.
-inline void arrowHead(QPainter &p, const QPointF &tip, const QPointF &dir,
-                      qreal len = 13.0, qreal halfWidth = 9.0)
-{
-    // Normalise direction.
-    const qreal mag = std::hypot(dir.x(), dir.y());
-    const QPointF d = mag > 0 ? QPointF(dir.x() / mag, dir.y() / mag) : QPointF(1, 0);
-    const QPointF n(-d.y(), d.x());                 // perpendicular
-    const QPointF base = tip - d * len;
-    QPolygonF tri;
-    tri << tip << (base + n * halfWidth) << (base - n * halfWidth);
-    p.drawPolygon(tri);
-}
-
-inline QIcon glyphIcon(const QColor &color, const QString &letter,
-                       bool bold, bool italic, bool underline)
-{
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    QFont f = p.font();
-    f.setPixelSize(46);
-    f.setBold(bold);
-    f.setItalic(italic);
-    f.setUnderline(underline);
-    p.setFont(f);
-    p.setPen(color);
-    p.drawText(QRectF(0, 0, kCanvas, kCanvas), Qt::AlignCenter, letter);
+    renderer.render(&p);
     p.end();
     return QIcon(pm);
 }
 
-inline QIcon newDocument(const QColor &color)
+inline QIcon newDocument(const QColor &c)
 {
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    p.setPen(strokePen(color));
-    p.setBrush(Qt::NoBrush);
-    QPainterPath path;
-    path.moveTo(16, 10);
-    path.lineTo(40, 10);
-    path.lineTo(48, 18);
-    path.lineTo(48, 54);
-    path.lineTo(16, 54);
-    path.closeSubpath();
-    p.drawPath(path);
-    // folded corner
-    p.drawLine(QPointF(40, 10), QPointF(40, 18));
-    p.drawLine(QPointF(40, 18), QPointF(48, 18));
-    p.end();
-    return QIcon(pm);
+    return svgIcon(QStringLiteral(
+        "<path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/>"
+        "<path d='M14 2v4a2 2 0 0 0 2 2h4'/>"), c);
 }
 
-inline QIcon open(const QColor &color)
+inline QIcon open(const QColor &c)
 {
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    p.setPen(strokePen(color));
-    p.setBrush(Qt::NoBrush);
-    // folder back with tab
-    QPainterPath body;
-    body.moveTo(12, 22);
-    body.lineTo(26, 22);
-    body.lineTo(30, 27);
-    body.lineTo(52, 27);
-    body.lineTo(52, 48);
-    body.lineTo(12, 48);
-    body.closeSubpath();
-    p.drawPath(body);
-    // open lid (slanted front)
-    QPainterPath lid;
-    lid.moveTo(12, 48);
-    lid.lineTo(20, 34);
-    lid.lineTo(58, 34);
-    lid.lineTo(52, 48);
-    p.drawPath(lid);
-    p.end();
-    return QIcon(pm);
+    return svgIcon(QStringLiteral(
+        "<path d='m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6"
+        "a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9"
+        "l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2'/>"), c);
 }
 
-inline QIcon save(const QColor &color)
+inline QIcon save(const QColor &c)
 {
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    p.setPen(strokePen(color, 4.5));
-    p.setBrush(Qt::NoBrush);
-    // floppy outline with clipped corner
-    QPainterPath body;
-    body.moveTo(14, 14);
-    body.lineTo(44, 14);
-    body.lineTo(50, 20);
-    body.lineTo(50, 50);
-    body.lineTo(14, 50);
-    body.closeSubpath();
-    p.drawPath(body);
-    // label area
-    p.drawRect(QRectF(22, 34, 20, 16));
-    // shutter (filled)
-    p.setBrush(color);
-    p.drawRect(QRectF(34, 16, 8, 12));
-    p.end();
-    return QIcon(pm);
+    return svgIcon(QStringLiteral(
+        "<path d='M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2"
+        "H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z'/>"
+        "<path d='M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7'/>"
+        "<path d='M7 3v4a1 1 0 0 0 1 1h7'/>"), c);
 }
 
-inline QIcon undo(const QColor &color)
+inline QIcon undo(const QColor &c)
 {
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    p.setPen(strokePen(color));
-    p.setBrush(Qt::NoBrush);
-    QPainterPath path;
-    path.moveTo(44, 46);
-    path.lineTo(44, 32);
-    path.quadTo(44, 22, 32, 22);
-    path.lineTo(24, 22);
-    p.drawPath(path);
-    p.setBrush(color);
-    p.setPen(Qt::NoPen);
-    arrowHead(p, QPointF(16, 22), QPointF(-1, 0));
-    p.end();
-    return QIcon(pm);
+    return svgIcon(QStringLiteral(
+        "<path d='M9 14 4 9l5-5'/>"
+        "<path d='M4 9h11a5.5 5.5 0 0 1 0 11h-4'/>"), c);
 }
 
-inline QIcon redo(const QColor &color)
+inline QIcon redo(const QColor &c)
 {
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    p.setPen(strokePen(color));
-    p.setBrush(Qt::NoBrush);
-    QPainterPath path;
-    path.moveTo(20, 46);
-    path.lineTo(20, 32);
-    path.quadTo(20, 22, 32, 22);
-    path.lineTo(40, 22);
-    p.drawPath(path);
-    p.setBrush(color);
-    p.setPen(Qt::NoPen);
-    arrowHead(p, QPointF(48, 22), QPointF(1, 0));
-    p.end();
-    return QIcon(pm);
+    return svgIcon(QStringLiteral(
+        "<path d='m15 14 5-5-5-5'/>"
+        "<path d='M20 9H9a5.5 5.5 0 0 0 0 11h4'/>"), c);
 }
 
-inline QIcon bold(const QColor &color)     { return glyphIcon(color, "B", true, false, false); }
-inline QIcon italic(const QColor &color)   { return glyphIcon(color, "I", false, true, false); }
-inline QIcon underline(const QColor &color){ return glyphIcon(color, "U", false, false, true); }
-
-// Alignment icons: four horizontal bars; `anchor` is 0=left, 1=center,
-// 2=right, 3=justify (full width on every line).
-inline QIcon align(const QColor &color, int anchor)
+inline QIcon bold(const QColor &c)
 {
-    QPainter p;
-    QPixmap pm = beginPixmap(p);
-    p.setPen(strokePen(color, 5.0));
-    const qreal ys[4] = {18, 29, 40, 51};
-    const qreal full = 40.0;
-    const qreal shortLens[4] = {40, 26, 40, 24};
-    for (int i = 0; i < 4; ++i) {
-        qreal len = (anchor == 3) ? full : shortLens[i];
-        qreal x1, x2;
-        switch (anchor) {
-        case 1: x1 = 32 - len / 2; x2 = 32 + len / 2; break;       // center
-        case 2: x2 = 52;           x1 = 52 - len;     break;       // right
-        default: x1 = 12;          x2 = 12 + len;     break;       // left / justify
-        }
-        p.drawLine(QPointF(x1, ys[i]), QPointF(x2, ys[i]));
-    }
-    p.end();
-    return QIcon(pm);
+    return svgIcon(QStringLiteral(
+        "<path d='M14 12a4 4 0 0 0 0-8H6v8'/>"
+        "<path d='M15 20a4 4 0 0 0 0-8H6v8Z'/>"), c);
 }
 
-inline QIcon alignLeft(const QColor &c)    { return align(c, 0); }
-inline QIcon alignCenter(const QColor &c)  { return align(c, 1); }
-inline QIcon alignRight(const QColor &c)   { return align(c, 2); }
-inline QIcon alignJustify(const QColor &c) { return align(c, 3); }
+inline QIcon italic(const QColor &c)
+{
+    return svgIcon(QStringLiteral(
+        "<line x1='19' x2='10' y1='4' y2='4'/>"
+        "<line x1='14' x2='5' y1='20' y2='20'/>"
+        "<line x1='15' x2='9' y1='4' y2='20'/>"), c);
+}
+
+inline QIcon underline(const QColor &c)
+{
+    return svgIcon(QStringLiteral(
+        "<path d='M6 4v6a6 6 0 0 0 12 0V4'/>"
+        "<line x1='4' x2='20' y1='20' y2='20'/>"), c);
+}
+
+inline QIcon alignLeft(const QColor &c)
+{
+    return svgIcon(QStringLiteral(
+        "<line x1='21' x2='3' y1='6' y2='6'/>"
+        "<line x1='15' x2='3' y1='12' y2='12'/>"
+        "<line x1='17' x2='3' y1='18' y2='18'/>"), c);
+}
+
+inline QIcon alignCenter(const QColor &c)
+{
+    return svgIcon(QStringLiteral(
+        "<line x1='21' x2='3' y1='6' y2='6'/>"
+        "<line x1='17' x2='7' y1='12' y2='12'/>"
+        "<line x1='19' x2='5' y1='18' y2='18'/>"), c);
+}
+
+inline QIcon alignRight(const QColor &c)
+{
+    return svgIcon(QStringLiteral(
+        "<line x1='21' x2='3' y1='6' y2='6'/>"
+        "<line x1='21' x2='9' y1='12' y2='12'/>"
+        "<line x1='21' x2='7' y1='18' y2='18'/>"), c);
+}
+
+inline QIcon alignJustify(const QColor &c)
+{
+    return svgIcon(QStringLiteral(
+        "<line x1='3' x2='21' y1='6' y2='6'/>"
+        "<line x1='3' x2='21' y1='12' y2='12'/>"
+        "<line x1='3' x2='21' y1='18' y2='18'/>"), c);
+}
 
 } // namespace IconFactory
 
