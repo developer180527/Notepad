@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1200</width>
+    <height>900</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>PagePad</string>
+  </property>
+  <widget class="QWidget" name="centralwidget"/>
+  <widget class="QMenuBar" name="menubar">
+   <widget class="QMenu" name="menuFile">
+    <property name="title"><string>&amp;File</string></property>
+    <addaction name="actionNew"/>
+    <addaction name="actionOpen"/>
+    <addaction name="actionSave"/>
+    <addaction name="actionSaveAs"/>
+    <addaction name="separator"/>
+    <addaction name="actionExportPdf"/>
+    <addaction name="separator"/>
+    <addaction name="actionQuit"/>
+   </widget>
+   <widget class="QMenu" name="menuEdit">
+    <property name="title"><string>&amp;Edit</string></property>
+    <addaction name="actionUndo"/>
+    <addaction name="actionRedo"/>
+    <addaction name="separator"/>
+    <addaction name="actionCut"/>
+    <addaction name="actionCopy"/>
+    <addaction name="actionPaste"/>
+    <addaction name="separator"/>
+    <addaction name="actionSelectAll"/>
+   </widget>
+   <widget class="QMenu" name="menuInsert">
+    <property name="title"><string>&amp;Insert</string></property>
+    <addaction name="actionInsertImage"/>
+   </widget>
+   <widget class="QMenu" name="menuFormat">
+    <property name="title"><string>F&amp;ormat</string></property>
+    <addaction name="actionBold"/>
+    <addaction name="actionItalic"/>
+    <addaction name="actionUnderline"/>
+    <addaction name="separator"/>
+    <addaction name="actionAlignLeft"/>
+    <addaction name="actionAlignCenter"/>
+    <addaction name="actionAlignRight"/>
+    <addaction name="actionAlignJustify"/>
+   </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title"><string>&amp;View</string></property>
+    <addaction name="actionZoomIn"/>
+    <addaction name="actionZoomOut"/>
+    <addaction name="actionResetZoom"/>
+    <addaction name="separator"/>
+    <addaction name="actionWordWrap"/>
+   </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title"><string>&amp;Help</string></property>
+    <addaction name="actionAbout"/>
+    <addaction name="actionAboutQt"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuEdit"/>
+   <addaction name="menuInsert"/>
+   <addaction name="menuFormat"/>
+   <addaction name="menuView"/>
+   <addaction name="menuHelp"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionNew">
+   <property name="text"><string>&amp;New</string></property>
+   <property name="shortcut"><string>Ctrl+N</string></property>
+  </action>
+  <action name="actionOpen">
+   <property name="text"><string>&amp;Open...</string></property>
+   <property name="shortcut"><string>Ctrl+O</string></property>
+  </action>
+  <action name="actionSave">
+   <property name="text"><string>&amp;Save</string></property>
+   <property name="shortcut"><string>Ctrl+S</string></property>
+  </action>
+  <action name="actionSaveAs">
+   <property name="text"><string>Save &amp;As...</string></property>
+   <property name="shortcut"><string>Ctrl+Shift+S</string></property>
+  </action>
+  <action name="actionExportPdf">
+   <property name="text"><string>Export as &amp;PDF...</string></property>
+  </action>
+  <action name="actionQuit">
+   <property name="text"><string>&amp;Quit</string></property>
+   <property name="shortcut"><string>Ctrl+Q</string></property>
+  </action>
+  <action name="actionUndo">
+   <property name="text"><string>&amp;Undo</string></property>
+   <property name="shortcut"><string>Ctrl+Z</string></property>
+  </action>
+  <action name="actionRedo">
+   <property name="text"><string>&amp;Redo</string></property>
+   <property name="shortcut"><string>Ctrl+Shift+Z</string></property>
+  </action>
+  <action name="actionCut">
+   <property name="text"><string>Cu&amp;t</string></property>
+   <property name="shortcut"><string>Ctrl+X</string></property>
+  </action>
+  <action name="actionCopy">
+   <property name="text"><string>&amp;Copy</string></property>
+   <property name="shortcut"><string>Ctrl+C</string></property>
+  </action>
+  <action name="actionPaste">
+   <property name="text"><string>&amp;Paste</string></property>
+   <property name="shortcut"><string>Ctrl+V</string></property>
+  </action>
+  <action name="actionSelectAll">
+   <property name="text"><string>Select &amp;All</string></property>
+   <property name="shortcut"><string>Ctrl+A</string></property>
+  </action>
+  <action name="actionInsertImage">
+   <property name="text"><string>&amp;Image...</string></property>
+  </action>
+  <action name="actionBold">
+   <property name="text"><string>&amp;Bold</string></property>
+   <property name="shortcut"><string>Ctrl+B</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionItalic">
+   <property name="text"><string>&amp;Italic</string></property>
+   <property name="shortcut"><string>Ctrl+I</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionUnderline">
+   <property name="text"><string>&amp;Underline</string></property>
+   <property name="shortcut"><string>Ctrl+U</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionAlignLeft">
+   <property name="text"><string>Align &amp;Left</string></property>
+   <property name="shortcut"><string>Ctrl+L</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionAlignCenter">
+   <property name="text"><string>Align &amp;Center</string></property>
+   <property name="shortcut"><string>Ctrl+E</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionAlignRight">
+   <property name="text"><string>Align &amp;Right</string></property>
+   <property name="shortcut"><string>Ctrl+R</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionAlignJustify">
+   <property name="text"><string>&amp;Justify</string></property>
+   <property name="shortcut"><string>Ctrl+J</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionZoomIn">
+   <property name="text"><string>Zoom &amp;In</string></property>
+   <property name="shortcut"><string>Ctrl++</string></property>
+  </action>
+  <action name="actionZoomOut">
+   <property name="text"><string>Zoom &amp;Out</string></property>
+   <property name="shortcut"><string>Ctrl+-</string></property>
+  </action>
+  <action name="actionResetZoom">
+   <property name="text"><string>&amp;Reset Zoom</string></property>
+   <property name="shortcut"><string>Ctrl+0</string></property>
+  </action>
+  <action name="actionWordWrap">
+   <property name="text"><string>&amp;Word Wrap</string></property>
+   <property name="checkable"><bool>true</bool></property>
+   <property name="checked"><bool>true</bool></property>
+  </action>
+  <action name="actionAbout">
+   <property name="text"><string>&amp;About PagePad</string></property>
+  </action>
+  <action name="actionAboutQt">
+   <property name="text"><string>About &amp;Qt</string></property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
