@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>PagePad</string>
+   <string>Notepad</string>
   </property>
   <widget class="QWidget" name="centralwidget"/>
   <widget class="QMenuBar" name="menubar">
@@ -186,7 +186,7 @@
    <property name="checked"><bool>true</bool></property>
   </action>
   <action name="actionAbout">
-   <property name="text"><string>&amp;About PagePad</string></property>
+   <property name="text"><string>&amp;About Notepad</string></property>
   </action>
   <action name="actionAboutQt">
    <property name="text"><string>About &amp;Qt</string></property>

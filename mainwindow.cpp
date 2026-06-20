@@ -24,6 +24,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QList>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPageLayout>
 #include <QPageSize>
@@ -59,6 +60,10 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
+    // Render the menu bar inside the window (above the toolbar) on every
+    // platform, instead of macOS's global menu bar — matches the design.
+    ui->menubar->setNativeMenuBar(false);
 
     setupEditorArea();
     applyCanvasTheme();
@@ -351,8 +356,8 @@ void MainWindow::connectActions()
 
     // Help
     connect(ui->actionAbout, &QAction::triggered, this, [this] {
-        QMessageBox::about(this, tr("About PagePad"),
-                           tr("<b>PagePad</b><br>A small, fast, paginated text editor.<br><br>"
+        QMessageBox::about(this, tr("About Notepad"),
+                           tr("<b>Notepad</b><br>A small, fast, paginated text editor.<br><br>"
                               "Built with Qt %1.").arg(QStringLiteral(QT_VERSION_STR)));
     });
     connect(ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
@@ -420,7 +425,7 @@ void MainWindow::openFile()
     const QString fn = QFileDialog::getOpenFileName(
         this, tr("Open"), QString(),
         tr("All Supported (*.note *.txt *.md *.markdown *.html *.htm);;"
-           "PagePad Note (*.note);;Text (*.txt);;Markdown (*.md *.markdown);;"
+           "Notepad Note (*.note);;Text (*.txt);;Markdown (*.md *.markdown);;"
            "HTML (*.html *.htm);;All Files (*)"));
     if (fn.isEmpty())
         return;
@@ -441,7 +446,7 @@ bool MainWindow::saveFileAs()
     QString suggested = m_filePath.isEmpty() ? QStringLiteral("Untitled.note") : m_filePath;
     QString fn = QFileDialog::getSaveFileName(
         this, tr("Save As"), suggested,
-        tr("PagePad Note (*.note);;Text (*.txt);;Markdown (*.md);;HTML (*.html)"),
+        tr("Notepad Note (*.note);;Text (*.txt);;Markdown (*.md);;HTML (*.html)"),
         &selectedFilter);
     if (fn.isEmpty())
         return false;
@@ -473,7 +478,7 @@ bool MainWindow::writeToFile(const QString &path)
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        QMessageBox::warning(this, tr("PagePad"),
+        QMessageBox::warning(this, tr("Notepad"),
                              tr("Cannot write %1:\n%2").arg(path, file.errorString()));
         return false;
     }
@@ -501,7 +506,7 @@ bool MainWindow::loadFromFile(const QString &path)
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::warning(this, tr("PagePad"),
+        QMessageBox::warning(this, tr("Notepad"),
                              tr("Cannot read %1:\n%2").arg(path, file.errorString()));
         return false;
     }
@@ -525,7 +530,7 @@ bool MainWindow::writeNote(const QString &path)
 {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        QMessageBox::warning(this, tr("PagePad"),
+        QMessageBox::warning(this, tr("Notepad"),
                              tr("Cannot write %1:\n%2").arg(path, file.errorString()));
         return false;
     }
@@ -584,7 +589,7 @@ bool MainWindow::readNote(const QString &path)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        QMessageBox::warning(this, tr("PagePad"),
+        QMessageBox::warning(this, tr("Notepad"),
                              tr("Cannot read %1:\n%2").arg(path, file.errorString()));
         return false;
     }
@@ -595,8 +600,8 @@ bool MainWindow::readNote(const QString &path)
     quint32 version = 0;
     in >> magic >> version;
     if (magic != QByteArray(kNoteMagic)) {
-        QMessageBox::warning(this, tr("PagePad"),
-                             tr("%1 is not a valid PagePad note.").arg(QFileInfo(path).fileName()));
+        QMessageBox::warning(this, tr("Notepad"),
+                             tr("%1 is not a valid Notepad note.").arg(QFileInfo(path).fileName()));
         return false;
     }
 
@@ -626,7 +631,7 @@ void MainWindow::setCurrentFile(const QString &path)
     m_editor->document()->setModified(false);
     setWindowModified(false);
     const QString name = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
-    setWindowTitle(tr("%1[*] %2 PagePad").arg(name, QString(QChar(0x2014))));
+    setWindowTitle(tr("%1[*] %2 Notepad").arg(name, QString(QChar(0x2014))));
     setWindowFilePath(path);
 }
 
@@ -635,7 +640,7 @@ bool MainWindow::maybeSave()
     if (!m_editor->document()->isModified())
         return true;
     const auto ret = QMessageBox::warning(
-        this, tr("PagePad"),
+        this, tr("Notepad"),
         tr("The document has been modified.\nDo you want to save your changes?"),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
     if (ret == QMessageBox::Save)
@@ -724,7 +729,7 @@ void MainWindow::insertImage()
         return;
     QImage img(fn);
     if (img.isNull()) {
-        QMessageBox::warning(this, tr("PagePad"), tr("Could not load image %1.").arg(fn));
+        QMessageBox::warning(this, tr("Notepad"), tr("Could not load image %1.").arg(fn));
         return;
     }
     m_editor->insertImage(img);
