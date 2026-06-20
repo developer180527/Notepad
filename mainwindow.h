@@ -10,6 +10,7 @@
 class PageDocumentItem;
 class CanvasView;
 class FindBar;
+class RulerWidget;
 class QGraphicsScene;
 class QFontComboBox;
 class QComboBox;
@@ -33,6 +34,9 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+
+    // Open a file by path (used by drag-drop, command line and macOS open events).
+    void openPath(const QString &path);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -88,6 +92,7 @@ private:
     CanvasView *m_view = nullptr;
     QGraphicsScene *m_scene = nullptr;
     FindBar *m_findBar = nullptr;
+    RulerWidget *m_ruler = nullptr;
 
     QFontComboBox *m_fontCombo = nullptr;
     QComboBox *m_sizeCombo = nullptr;

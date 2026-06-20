@@ -61,6 +61,7 @@
     <addaction name="actionZoomOut"/>
     <addaction name="actionResetZoom"/>
     <addaction name="separator"/>
+    <addaction name="actionShowRuler"/>
     <addaction name="actionWordWrap"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
@@ -179,6 +180,11 @@
   <action name="actionResetZoom">
    <property name="text"><string>&amp;Reset Zoom</string></property>
    <property name="shortcut"><string>Ctrl+0</string></property>
+  </action>
+  <action name="actionShowRuler">
+   <property name="text"><string>Show &amp;Ruler</string></property>
+   <property name="checkable"><bool>true</bool></property>
+   <property name="checked"><bool>true</bool></property>
   </action>
   <action name="actionWordWrap">
    <property name="text"><string>&amp;Word Wrap</string></property>

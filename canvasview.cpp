@@ -18,6 +18,7 @@ CanvasView::CanvasView(QWidget *parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setFocusPolicy(Qt::StrongFocus);
+    setAcceptDrops(true);          // forward drops to the page item
     setOptimizationFlag(QGraphicsView::DontSavePainterState, true);
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
 }

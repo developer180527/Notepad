@@ -3,9 +3,11 @@
 
 #include "canvasview.h"
 #include "findbar.h"
+#include "fontlibrary.h"
 #include "iconfactory.h"
 #include "pagedocumentitem.h"
 #include "pagesetupdialog.h"
+#include "rulerwidget.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -33,6 +35,7 @@
 #include <QPdfWriter>
 #include <QPixmap>
 #include <QRegularExpression>
+#include <QScrollBar>
 #include <QSet>
 #include <QSlider>
 #include <QStatusBar>
@@ -51,7 +54,7 @@
 #include <cmath>
 
 namespace {
-constexpr quint32 kNoteVersion = 1;
+constexpr quint32 kNoteVersion = 2;   // v2 adds an embedded-font section
 const char *kNoteMagic = "PPNOTE";
 } // namespace
 
@@ -60,6 +63,8 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
+    FontLibrary::load();   // register bundled portable fonts
 
     // Render the menu bar inside the window (above the toolbar) on every
     // platform, instead of macOS's global menu bar — matches the design.
@@ -81,11 +86,15 @@ MainWindow::MainWindow(QWidget *parent)
     refreshIcons();
     applyPageSetup();
 
-    // Base font from the system default; size combo + zoom layer on top of it.
-    m_baseFontFamily = m_editor->document()->defaultFont().family();
+    // Default to a bundled (portable) font so new documents render identically
+    // everywhere; fall back to the system default if no bundled font loaded.
+    m_baseFontFamily = FontLibrary::defaultFamily().isEmpty()
+                           ? m_editor->document()->defaultFont().family()
+                           : FontLibrary::defaultFamily();
     m_baseFontSize = 12.0;
+    applyBaseFont();
     m_updatingControls = true;
-    m_fontCombo->setCurrentFont(m_editor->document()->defaultFont());
+    m_fontCombo->setCurrentFont(QFont(m_baseFontFamily));
     m_sizeCombo->setCurrentText(QStringLiteral("12"));
     m_updatingControls = false;
 
@@ -117,17 +126,26 @@ void MainWindow::setupEditorArea()
 
     m_view = new CanvasView(this);
     m_view->setScene(m_scene);
+    m_view->setFrameShape(QFrame::NoFrame);   // keep the ruler aligned with the viewport
 
     m_findBar = new FindBar(this);
     m_findBar->hide();
+
+    m_ruler = new RulerWidget(m_view, m_editor, this);
 
     auto *central = new QWidget(this);
     auto *centralLayout = new QVBoxLayout(central);
     centralLayout->setContentsMargins(0, 0, 0, 0);
     centralLayout->setSpacing(0);
     centralLayout->addWidget(m_findBar);
+    centralLayout->addWidget(m_ruler);
     centralLayout->addWidget(m_view, 1);
     setCentralWidget(central);
+
+    // The ruler must repaint whenever the page moves under it (zoom or scroll).
+    connect(m_view, &CanvasView::zoomChanged, this, [this](qreal) { m_ruler->update(); });
+    connect(m_view->horizontalScrollBar(), &QScrollBar::valueChanged, this,
+            [this](int) { m_ruler->update(); });
 
     updateSceneRect();
 }
@@ -334,6 +352,9 @@ void MainWindow::connectActions()
     connect(ui->actionZoomIn, &QAction::triggered, this, [this] { setZoom(m_zoom + 10); });
     connect(ui->actionZoomOut, &QAction::triggered, this, [this] { setZoom(m_zoom - 10); });
     connect(ui->actionResetZoom, &QAction::triggered, this, [this] { setZoom(100); });
+    connect(ui->actionShowRuler, &QAction::toggled, this, [this](bool on) {
+        m_ruler->setVisible(on);
+    });
     // Text always wraps to the fixed page width, so word-wrap toggling is moot.
     ui->actionWordWrap->setVisible(false);
     connect(m_zoomCombo, &QComboBox::textActivated, this, [this](const QString &t) {
@@ -386,6 +407,7 @@ void MainWindow::connectActions()
         if (m_view)
             m_view->ensureVisible(r, 24, 48);
     });
+    connect(m_editor, &PageDocumentItem::openFileRequested, this, &MainWindow::openPath);
 }
 
 void MainWindow::refreshIcons()
@@ -439,6 +461,14 @@ void MainWindow::openFile()
         return;
     if (loadFromFile(fn))
         setCurrentFile(fn);
+}
+
+void MainWindow::openPath(const QString &path)
+{
+    if (path.isEmpty() || !maybeSave())
+        return;
+    if (loadFromFile(path))
+        setCurrentFile(path);
 }
 
 bool MainWindow::saveFile()
@@ -578,6 +608,25 @@ bool MainWindow::writeNote(const QString &path)
         }
     }
 
+    // Embed the bundled fonts actually used so the note renders identically on
+    // any machine. (System fonts can't be extracted by Qt, so those rely on the
+    // recipient having them — documents default to a bundled font.)
+    QList<QPair<QString, QByteArray>> fonts;
+    QSet<QString> familiesSeen;
+    auto considerFamily = [&](const QString &family) {
+        if (family.isEmpty() || familiesSeen.contains(family))
+            return;
+        familiesSeen.insert(family);
+        const QByteArray data = FontLibrary::fontData(family);
+        if (!data.isEmpty())
+            fonts.append({family, data});
+    };
+    considerFamily(doc->defaultFont().family());
+    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next())
+        for (auto it = block.begin(); !it.atEnd(); ++it)
+            if (it.fragment().isValid())
+                considerFamily(it.fragment().charFormat().font().family());
+
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_6_5);
     out << QByteArray(kNoteMagic) << kNoteVersion;
@@ -585,6 +634,9 @@ bool MainWindow::writeNote(const QString &path)
     out << static_cast<quint32>(images.size());
     for (const auto &img : images)
         out << img.first << img.second;
+    out << static_cast<quint32>(fonts.size());
+    for (const auto &font : fonts)
+        out << font.first << font.second;
     file.close();
 
     m_editor->document()->setModified(false);
@@ -623,6 +675,18 @@ bool MainWindow::readNote(const QString &path)
         QImage img;
         if (img.loadFromData(bytes))
             m_editor->document()->addResource(QTextDocument::ImageResource, QUrl(name), img);
+    }
+
+    // v2+: register embedded fonts before laying out the html.
+    if (version >= 2) {
+        quint32 fontCount = 0;
+        in >> fontCount;
+        for (quint32 i = 0; i < fontCount; ++i) {
+            QString family;
+            QByteArray data;
+            in >> family >> data;
+            FontLibrary::registerFontData(data);
+        }
     }
     file.close();
 
@@ -828,6 +892,8 @@ void MainWindow::applyPageSetup()
     if (m_fitCombo && m_fitCombo->currentIndex() == 0)
         applyFitMode();
     updatePageLabel();
+    if (m_ruler)
+        m_ruler->update();
 }
 
 void MainWindow::openPageSetup()
@@ -872,6 +938,8 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     // Only re-fit on resize when in Fit-Width mode; Actual Size stays put.
     if (m_fitCombo && m_fitCombo->currentIndex() == 0)
         applyFitMode();
+    if (m_ruler)
+        m_ruler->update();
 }
 
 void MainWindow::changeEvent(QEvent *event)

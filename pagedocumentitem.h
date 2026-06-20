@@ -7,8 +7,10 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextImageFormat>
 
 class QTimer;
+class QGraphicsSceneDragDropEvent;
 
 // The editable, paginated page surface.
 //
@@ -57,6 +59,8 @@ public:
     int currentPage() const;
     int pageWidthPx() const { return qRound(m_sheetSize.width()); }
     qreal pageHeightPx() const { return m_sheetSize.height(); }
+    qreal pageMarginLeftPx() const { return m_margins.left(); }
+    qreal pageMarginRightPx() const { return m_margins.right(); }
     QRectF caretSceneRect() const;
 
     // Page geometry in device-independent pixels (driven by Page Setup).
@@ -70,6 +74,7 @@ signals:
     void redoAvailable(bool available);
     void selectionAvailable(bool available);
     void ensureVisibleRequested(const QRectF &sceneRect);
+    void openFileRequested(const QString &path);   // a document file was dropped
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -82,6 +87,9 @@ protected:
     void hoverMoveEvent(QGraphicsSceneHoverEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+    void dragEnterEvent(QGraphicsSceneDragDropEvent *event) override;
+    void dragMoveEvent(QGraphicsSceneDragDropEvent *event) override;
+    void dropEvent(QGraphicsSceneDragDropEvent *event) override;
 
 private:
     qreal textW() const { return m_sheetSize.width() - m_margins.left() - m_margins.right(); }
@@ -89,6 +97,16 @@ private:
     QRectF sheetRect(int page) const;
     QRectF textRect(int page) const;
     int documentPositionAt(const QPointF &itemPos) const;
+
+    // Image selection / resize helpers.
+    QTextImageFormat imageFormatAt(int pos) const;
+    QRectF imageItemRect(int imagePos) const;
+    int imageAt(const QPointF &itemPos) const;        // fragment start, or -1
+    static QPointF handlePoint(const QRectF &rect, int index);
+    int handleAt(const QPointF &itemPos) const;        // 0..7, or -1
+    void applyImageSize(int imagePos, qreal w, qreal h);
+    void clearImageSelection();
+
     void recomputePages();
     void setCursorAndNotify(const QTextCursor &cursor);
     void afterCursorMoved();        // re-sync typing format from cursor + notify
@@ -107,6 +125,12 @@ private:
     bool m_caretOn = true;
     bool m_focused = false;
     bool m_selecting = false;
+
+    // Image selection / resize state.
+    int m_selectedImagePos = -1;
+    int m_resizeHandle = -1;
+    QRectF m_resizeStartRect;
+    qreal m_resizeAspect = 1.0;
 };
 
 #endif // PAGEDOCUMENTITEM_H

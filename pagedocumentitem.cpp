@@ -4,7 +4,9 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QFileInfo>
 #include <QFocusEvent>
+#include <QGraphicsSceneDragDropEvent>
 #include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QInputMethodEvent>
@@ -15,8 +17,10 @@
 #include <QStyleOptionGraphicsItem>
 #include <QTextBlock>
 #include <QTextDocumentFragment>
+#include <QTextFragment>
 #include <QTextImageFormat>
 #include <QTextLayout>
+#include <QUrl>
 #include <QTimer>
 #include <QUrl>
 
@@ -29,6 +33,7 @@ PageDocumentItem::PageDocumentItem(QGraphicsItem *parent)
     setFlag(QGraphicsItem::ItemUsesExtendedStyleOption, true); // exposedRect for culling
     setFlag(QGraphicsItem::ItemAcceptsInputMethod, true);
     setAcceptHoverEvents(true);
+    setAcceptDrops(true);
     setCursor(Qt::IBeamCursor);
 
     // A4 portrait @ 96 dpi with 25 mm margins by default.
@@ -165,6 +170,23 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
         m_doc->documentLayout()->draw(painter, ctx);
         painter->restore();
     }
+
+    // Selection chrome for an image: a border plus 8 resize handles.
+    if (m_focused && m_selectedImagePos >= 0) {
+        const QRectF r = imageItemRect(m_selectedImagePos);
+        if (r.isValid()) {
+            const QColor accent(0x37, 0x8A, 0xDD);
+            painter->setBrush(Qt::NoBrush);
+            painter->setPen(QPen(accent, 1.5));
+            painter->drawRect(r);
+            painter->setPen(QPen(accent.darker(120), 1));
+            painter->setBrush(Qt::white);
+            for (int i = 0; i < 8; ++i) {
+                const QPointF p = handlePoint(r, i);
+                painter->drawRect(QRectF(p.x() - 4, p.y() - 4, 8, 8));
+            }
+        }
+    }
 }
 
 // --------------------------------------------------------------- cursor helpers
@@ -224,6 +246,7 @@ void PageDocumentItem::notifyCursorUi()
 
 void PageDocumentItem::afterCursorMoved()
 {
+    m_selectedImagePos = -1;       // any caret move / edit drops the image selection
     m_typingFormat = m_cursor.charFormat();
     m_caretOn = true;
     notifyCursorUi();
@@ -235,6 +258,125 @@ void PageDocumentItem::setCursorAndNotify(const QTextCursor &cursor)
 {
     m_cursor = cursor;
     afterCursorMoved();
+}
+
+// --------------------------------------------------------------- image helpers
+
+QTextImageFormat PageDocumentItem::imageFormatAt(int pos) const
+{
+    const QTextBlock block = m_doc->findBlock(pos);
+    if (!block.isValid())
+        return QTextImageFormat();
+    for (auto it = block.begin(); !it.atEnd(); ++it) {
+        const QTextFragment frag = it.fragment();
+        if (!frag.isValid() || !frag.charFormat().isImageFormat())
+            continue;
+        if (pos >= frag.position() && pos < frag.position() + frag.length())
+            return frag.charFormat().toImageFormat();
+    }
+    return QTextImageFormat();
+}
+
+QRectF PageDocumentItem::imageItemRect(int imagePos) const
+{
+    const QTextBlock block = m_doc->findBlock(imagePos);
+    if (!block.isValid())
+        return QRectF();
+
+    QTextImageFormat fmt = imageFormatAt(imagePos);
+    qreal w = fmt.width();
+    qreal h = fmt.height();
+    if (w <= 0 || h <= 0) {
+        const QImage im = m_doc->resource(QTextDocument::ImageResource,
+                                          QUrl(fmt.name())).value<QImage>();
+        if (!im.isNull()) {
+            if (w <= 0) w = im.width();
+            if (h <= 0) h = im.height();
+        }
+    }
+
+    const QRectF blockRect = m_doc->documentLayout()->blockBoundingRect(block);
+    qreal docX = blockRect.left();
+    qreal docY = blockRect.top();
+    if (QTextLayout *layout = block.layout()) {
+        const int inBlock = imagePos - block.position();
+        const QTextLine line = layout->lineForTextPosition(inBlock);
+        if (line.isValid()) {
+            docX = blockRect.left() + line.cursorToX(inBlock);
+            docY = blockRect.top() + line.y();
+            const qreal extra = line.height() - h;   // inline image sits on the baseline
+            if (extra > 0)
+                docY += extra;
+        }
+    }
+
+    const qreal th = textH();
+    const int page = qBound(0, static_cast<int>(docY / th), m_pageCount - 1);
+    const QRectF tr = textRect(page);
+    return QRectF(tr.left() + docX, tr.top() + (docY - page * th), w, h);
+}
+
+int PageDocumentItem::imageAt(const QPointF &itemPos) const
+{
+    const QTextBlock block = m_doc->findBlock(documentPositionAt(itemPos));
+    if (!block.isValid())
+        return -1;
+    for (auto it = block.begin(); !it.atEnd(); ++it) {
+        const QTextFragment frag = it.fragment();
+        if (frag.isValid() && frag.charFormat().isImageFormat()
+            && imageItemRect(frag.position()).contains(itemPos))
+            return frag.position();
+    }
+    return -1;
+}
+
+QPointF PageDocumentItem::handlePoint(const QRectF &r, int index)
+{
+    switch (index) {
+    case 0: return r.topLeft();
+    case 1: return QPointF(r.center().x(), r.top());
+    case 2: return r.topRight();
+    case 3: return QPointF(r.right(), r.center().y());
+    case 4: return r.bottomRight();
+    case 5: return QPointF(r.center().x(), r.bottom());
+    case 6: return r.bottomLeft();
+    default: return QPointF(r.left(), r.center().y());   // 7
+    }
+}
+
+int PageDocumentItem::handleAt(const QPointF &itemPos) const
+{
+    if (m_selectedImagePos < 0)
+        return -1;
+    const QRectF r = imageItemRect(m_selectedImagePos);
+    for (int i = 0; i < 8; ++i) {
+        const QPointF p = handlePoint(r, i);
+        if (QRectF(p.x() - 6, p.y() - 6, 12, 12).contains(itemPos))
+            return i;
+    }
+    return -1;
+}
+
+void PageDocumentItem::applyImageSize(int imagePos, qreal w, qreal h)
+{
+    QTextImageFormat fmt = imageFormatAt(imagePos);
+    if (fmt.name().isEmpty())
+        return;
+    fmt.setWidth(qRound(qMax(16.0, w)));
+    fmt.setHeight(qRound(qMax(16.0, h)));
+    QTextCursor c(m_doc);
+    c.setPosition(imagePos);
+    c.setPosition(imagePos + 1, QTextCursor::KeepAnchor);
+    c.setCharFormat(fmt);
+    update();
+}
+
+void PageDocumentItem::clearImageSelection()
+{
+    if (m_selectedImagePos >= 0) {
+        m_selectedImagePos = -1;
+        update();
+    }
 }
 
 void PageDocumentItem::documentReset()
@@ -286,6 +428,13 @@ void PageDocumentItem::paste()
     const QMimeData *mime = QApplication::clipboard()->mimeData();
     if (!mime)
         return;
+    if (mime->hasImage()) {
+        const QImage img = qvariant_cast<QImage>(mime->imageData());
+        if (!img.isNull()) {
+            insertImage(img);
+            return;
+        }
+    }
     if (mime->hasHtml())
         m_cursor.insertHtml(mime->html());
     else if (mime->hasText())
@@ -467,6 +616,32 @@ void PageDocumentItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
         return;
     }
     setFocus();
+
+    // 1) Grabbing a resize handle of the already-selected image.
+    const int handle = handleAt(event->pos());
+    if (handle >= 0) {
+        m_resizeHandle = handle;
+        m_resizeStartRect = imageItemRect(m_selectedImagePos);
+        m_resizeAspect = m_resizeStartRect.height() > 0
+                             ? m_resizeStartRect.width() / m_resizeStartRect.height() : 1.0;
+        m_cursor.beginEditBlock();   // group the whole drag into one undo step
+        event->accept();
+        return;
+    }
+
+    // 2) Clicking on an image selects it (handles appear).
+    const int imgPos = imageAt(event->pos());
+    if (imgPos >= 0) {
+        m_selectedImagePos = imgPos;
+        m_cursor.setPosition(imgPos);     // so alignment acts on the image's block
+        m_typingFormat = m_cursor.charFormat();
+        notifyCursorUi();
+        update();
+        event->accept();
+        return;
+    }
+
+    // 3) Normal text caret / selection.
     const int pos = documentPositionAt(event->pos());
     if (event->modifiers() & Qt::ShiftModifier)
         m_cursor.setPosition(pos, QTextCursor::KeepAnchor);
@@ -479,6 +654,27 @@ void PageDocumentItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
 
 void PageDocumentItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (m_resizeHandle >= 0 && m_selectedImagePos >= 0) {
+        const QRectF r = m_resizeStartRect;
+        const bool freeRatio = event->modifiers() & Qt::ShiftModifier;
+        const bool wide = m_resizeHandle == 0 || m_resizeHandle == 2 || m_resizeHandle == 3
+                          || m_resizeHandle == 4 || m_resizeHandle == 6 || m_resizeHandle == 7;
+        const bool tall = m_resizeHandle == 0 || m_resizeHandle == 1 || m_resizeHandle == 2
+                          || m_resizeHandle == 4 || m_resizeHandle == 5 || m_resizeHandle == 6;
+        const bool corner = wide && tall;
+
+        qreal w = wide ? (event->pos().x() - r.left()) : r.width();
+        qreal h = tall ? (event->pos().y() - r.top()) : r.height();
+        w = qMax(16.0, w);
+        h = qMax(16.0, h);
+        if (corner && !freeRatio)
+            h = w / m_resizeAspect;       // keep aspect from the dominant (width) axis
+
+        applyImageSize(m_selectedImagePos, w, h);
+        event->accept();
+        return;
+    }
+
     if (!m_selecting) {
         event->ignore();
         return;
@@ -492,6 +688,11 @@ void PageDocumentItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void PageDocumentItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (m_resizeHandle >= 0) {
+        m_resizeHandle = -1;
+        m_cursor.endEditBlock();
+        emit contentsChanged();           // mark modified
+    }
     m_selecting = false;
     event->accept();
 }
@@ -544,4 +745,71 @@ QVariant PageDocumentItem::inputMethodQuery(Qt::InputMethodQuery query) const
     case Qt::ImCurrentSelection:return m_cursor.selectedText();
     default:                    return QVariant();
     }
+}
+
+// --------------------------------------------------------------- drag & drop
+
+static bool mimeHasUsableContent(const QMimeData *mime)
+{
+    if (mime->hasImage() || mime->hasUrls())
+        return true;
+    return false;
+}
+
+void PageDocumentItem::dragEnterEvent(QGraphicsSceneDragDropEvent *event)
+{
+    if (mimeHasUsableContent(event->mimeData()))
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void PageDocumentItem::dragMoveEvent(QGraphicsSceneDragDropEvent *event)
+{
+    if (mimeHasUsableContent(event->mimeData()))
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void PageDocumentItem::dropEvent(QGraphicsSceneDragDropEvent *event)
+{
+    const QMimeData *mime = event->mimeData();
+    setFocus();
+    m_cursor.setPosition(documentPositionAt(event->pos()));
+
+    // A pasted/dragged bitmap.
+    if (mime->hasImage()) {
+        const QImage img = qvariant_cast<QImage>(mime->imageData());
+        if (!img.isNull()) {
+            insertImage(img);
+            event->acceptProposedAction();
+            return;
+        }
+    }
+
+    static const QStringList imageExt = {"png", "jpg", "jpeg", "bmp", "gif", "webp", "tiff"};
+    static const QStringList docExt = {"note", "txt", "md", "markdown", "html", "htm"};
+    bool handled = false;
+    for (const QUrl &url : mime->urls()) {
+        if (!url.isLocalFile())
+            continue;
+        const QString path = url.toLocalFile();
+        const QString suffix = QFileInfo(path).suffix().toLower();
+        if (imageExt.contains(suffix)) {
+            const QImage img(path);
+            if (!img.isNull()) {
+                insertImage(img);
+                handled = true;
+            }
+        } else if (docExt.contains(suffix)) {
+            emit openFileRequested(path);     // let MainWindow open it
+            handled = true;
+            break;
+        }
+    }
+    if (handled)
+        event->acceptProposedAction();
+    else
+        event->ignore();
 }
