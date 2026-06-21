@@ -1,66 +1,75 @@
-# Packaging & file association (`.note`)
+# Packaging: `.note` file association & thumbnails
 
-Notepad opens a `.note` passed on the command line or via the macOS open-file
-event (`main.cpp`). To make a double-click in the file manager launch Notepad,
-the OS must be told that Notepad owns the `.note` type. The runtime handling is
-done; the OS registration differs per platform.
+Every v3 `.note` embeds a rendered preview PNG right after its version header.
+All three platforms' thumbnailers extract that same PNG, so the integration is
+mostly registration plumbing. The app already opens a `.note` passed on the
+command line / open-file event (`main.cpp`), so the editing side of double-click
+works everywhere once the OS routes the file to Notepad.
 
-## macOS
+---
 
-The app bundle declares the `.note` document type and the `org.notepad.note`
-UTI in `Info.plist.in` (wired up in `CMakeLists.txt`). Launch Services picks
-this up when the app is in `/Applications` (or after it has been launched once).
-If a freshly built bundle isn't associated yet, register it manually:
+## macOS  (built & wired automatically)
 
-```sh
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-    -f build/Notepad.app
-```
+Two app extensions in `mac/` are built, embedded in `Notepad.app/Contents/PlugIns/`,
+code-signed and registered by the CMake `POST_BUILD` step (see `CMakeLists.txt`,
+`if(APPLE)`):
 
-Then `open -a build/Notepad.app file.note` or a Finder double-click opens it.
+- **Thumbnail** — `QLThumbnailProvider` → Finder icon preview.
+- **Quick Look** — view-based `QLPreviewingController` → spacebar preview.
 
-## Windows
+Just `cmake --build build`. If Finder is stale: `qlmanage -r && qlmanage -r cache`,
+and keep `Notepad.app` at a stable path (e.g. `/Applications`). Override the
+signing identity with `-DNOTEPAD_SIGN_IDENTITY="…"`.
 
-Associate the extension at install time (e.g. in your NSIS/WiX installer), or
-for a quick local test via the registry:
-
-```
-HKEY_CURRENT_USER\Software\Classes\.note            (Default) = "Notepad.Document"
-HKEY_CURRENT_USER\Software\Classes\Notepad.Document\shell\open\command
-    (Default) = "C:\Path\To\Notepad.exe" "%1"
-```
-
-The `"%1"` is the file path, which `main.cpp` reads from `argv`.
+---
 
 ## Linux
 
-Install a MIME type and a `.desktop` entry:
+`cmake --build build` produces a `note-thumbnailer` binary; `cmake --install`
+lays down the registration files:
 
-`~/.local/share/mime/packages/notepad-note.xml`:
+| File | Installed to | Purpose |
+|------|--------------|---------|
+| `note-thumbnailer`        | `bin/`                | extracts + scales the embedded PNG |
+| `linux/notepad.desktop`   | `share/applications/` | app + `.note` association (`Exec=Notepad %f`) |
+| `linux/notepad-note.xml`  | `share/mime/packages/`| defines `application/x-notepad-note` (`*.note`) |
+| `linux/notepad.thumbnailer` | `share/thumbnailers/` | tells GNOME/KDE/XFCE to run the thumbnailer |
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/x-notepad-note">
-    <comment>Notepad Note</comment>
-    <glob pattern="*.note"/>
-  </mime-type>
-</mime-info>
-```
-
-`~/.local/share/applications/notepad.desktop`:
-
-```ini
-[Desktop Entry]
-Type=Application
-Name=Notepad
-Exec=/path/to/Notepad %f
-MimeType=application/x-notepad-note;
-```
-
-Then:
+After installing (to a prefix on `XDG_DATA_DIRS`, e.g. `/usr` or `~/.local`):
 
 ```sh
-update-mime-database ~/.local/share/mime
-update-desktop-database ~/.local/share/applications
+update-mime-database   "$PREFIX/share/mime"
+update-desktop-database "$PREFIX/share/applications"
+# thumbnail caches differ by DE; re-login or clear ~/.cache/thumbnails to refresh
 ```
+
+`note-thumbnailer` and `Notepad` must be on `PATH` (or use absolute paths in the
+`.desktop`/`.thumbnailer` `Exec=` lines). Verified manually:
+`note-thumbnailer in.note out.png 256` writes the scaled preview.
+
+---
+
+## Windows
+
+`cmake --build build` produces `NoteThumbnail.dll` (an `IThumbnailProvider` COM
+server, `windows/NoteThumbnailProvider.cpp`). Keep it **next to `Notepad.exe`**.
+
+**Registration is automatic**: on launch, `Notepad.exe` self-registers (per-user,
+no admin) via `winregister.cpp` — it writes the `.note` → `Notepad.Note` ProgId +
+open command, and points the `.note` thumbnail handler at `NoteThumbnail.dll`'s
+CLSID. So running Notepad once enables both double-click open and thumbnails.
+
+Manual alternative (if not self-registering):
+
+```bat
+regsvr32 NoteThumbnail.dll          REM registers the CLSID + .note handler (HKCU)
+```
+
+To refresh Explorer's thumbnail cache after first install, restart Explorer or
+clear the thumbnail cache. An installer (WiX/NSIS) should drop `Notepad.exe` +
+`NoteThumbnail.dll` together and may register machine-wide (HKLM) instead.
+
+> Status: the Windows DLL + registration are written but were **not** compiled or
+> tested on the authoring machine (macOS). They follow Microsoft's standard
+> `IThumbnailProvider`/`IInitializeWithStream` pattern; build with MSVC + the
+> Windows SDK and verify in Explorer.

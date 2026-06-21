@@ -24,6 +24,8 @@ qt_add_executable(Notepad
     rulerwidget.h
     fontlibrary.cpp
     fontlibrary.h
+    winregister.cpp
+    winregister.h
 )
 
 # Embed the bundled portable fonts as :/fonts/*.ttf (AUTORCC is not enabled by
@@ -130,6 +132,31 @@ if(APPLE)
         COMMAND qlmanage -r
         COMMAND qlmanage -r cache
         VERBATIM)
+endif()
+
+# Linux: a freedesktop thumbnailer + the MIME/desktop/thumbnailer registration
+# files. The app already opens a .note from argv (double-click via the desktop
+# entry). Run update-mime-database / update-desktop-database after install.
+if(UNIX AND NOT APPLE)
+    add_executable(note-thumbnailer linux/note-thumbnailer.cpp)
+    target_link_libraries(note-thumbnailer PRIVATE Qt::Gui)
+    install(TARGETS note-thumbnailer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES linux/notepad.desktop DESTINATION share/applications)
+    install(FILES linux/notepad-note.xml DESTINATION share/mime/packages)
+    install(FILES linux/notepad.thumbnailer DESTINATION share/thumbnailers)
+endif()
+
+# Windows: an IThumbnailProvider COM DLL. The app self-registers the .note
+# association + this DLL's CLSID on launch (winregister.cpp), so it must sit
+# next to Notepad.exe.
+if(WIN32)
+    add_library(NoteThumbnail SHARED
+        windows/NoteThumbnailProvider.cpp
+        windows/NoteThumbnailProvider.def)
+    set_target_properties(NoteThumbnail PROPERTIES OUTPUT_NAME "NoteThumbnail" PREFIX "")
+    target_link_libraries(NoteThumbnail PRIVATE shlwapi windowscodecs ole32 advapi32 user32)
+    add_dependencies(Notepad NoteThumbnail)
+    install(TARGETS NoteThumbnail RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 install(TARGETS Notepad

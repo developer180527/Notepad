@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "winregister.h"
 
 #include <QApplication>
 #include <QFileOpenEvent>
@@ -46,6 +47,10 @@ private:
 int main(int argc, char *argv[])
 {
     NotepadApplication a(argc, argv);
+
+    // On Windows, ensure the .note association + thumbnail handler are registered
+    // (per-user). No-op elsewhere.
+    registerWindowsIntegration();
 
     QTranslator translator;
     const QStringList uiLanguages = QLocale::system().uiLanguages();

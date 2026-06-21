@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=note-thumbnailer
+Exec=note-thumbnailer %i %o %s
+MimeType=application/x-notepad-note;

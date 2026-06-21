@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Notepad
+Comment=A small paginated text editor
+Exec=Notepad %f
+Icon=notepad
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=application/x-notepad-note;text/plain;text/markdown;
