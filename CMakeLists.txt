@@ -42,19 +42,95 @@ qt_add_translations(
     TS_FILES Notepad_en_IN.ts
 )
 
-# macOS: register the .note document type so Finder can open it with Notepad.
-if(APPLE)
-    set_target_properties(Notepad PROPERTIES
-        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in
-    )
-endif()
-
 target_link_libraries(Notepad
     PRIVATE
         Qt::Core
         Qt::Widgets
         Qt::Svg
 )
+
+# macOS: register the .note document type, and add Quick Look + thumbnail
+# extensions so Finder shows a content preview of .note files.
+if(APPLE)
+    enable_language(OBJC)
+
+    set_target_properties(Notepad PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in
+    )
+
+    set(NOTEPAD_SIGN_IDENTITY "Apple Development"
+        CACHE STRING "codesign identity for Notepad and its extensions")
+
+    # --- Thumbnail extension (Finder icon preview) ---
+    add_executable(NotepadThumbnail MACOSX_BUNDLE
+        mac/NoteParser.h mac/NoteParser.m
+        mac/ThumbnailExtension/ThumbnailProvider.h
+        mac/ThumbnailExtension/ThumbnailProvider.m)
+    set_target_properties(NotepadThumbnail PROPERTIES
+        BUNDLE TRUE
+        BUNDLE_EXTENSION "appex"
+        OUTPUT_NAME "NotepadThumbnail"
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/mac/ThumbnailExtension/Info.plist)
+    target_compile_options(NotepadThumbnail PRIVATE -fobjc-arc -fapplication-extension)
+    target_include_directories(NotepadThumbnail PRIVATE mac)
+    target_link_libraries(NotepadThumbnail PRIVATE
+        "-framework Foundation" "-framework AppKit" "-framework CoreGraphics"
+        "-framework QuickLookThumbnailing")
+    # App extensions use the system NSExtensionMain entry point (no main()).
+    target_link_options(NotepadThumbnail PRIVATE -fapplication-extension -Wl,-e,_NSExtensionMain)
+
+    # --- Quick Look preview extension (spacebar) ---
+    add_executable(NotepadPreview MACOSX_BUNDLE
+        mac/NoteParser.h mac/NoteParser.m
+        mac/PreviewExtension/PreviewProvider.h
+        mac/PreviewExtension/PreviewProvider.m)
+    set_target_properties(NotepadPreview PROPERTIES
+        BUNDLE TRUE
+        BUNDLE_EXTENSION "appex"
+        OUTPUT_NAME "NotepadPreview"
+        AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/mac/PreviewExtension/Info.plist)
+    target_compile_options(NotepadPreview PRIVATE -fobjc-arc -fapplication-extension)
+    target_include_directories(NotepadPreview PRIVATE mac)
+    target_link_libraries(NotepadPreview PRIVATE
+        "-framework Foundation" "-framework AppKit" "-framework CoreGraphics"
+        "-framework QuickLookUI")
+    target_link_options(NotepadPreview PRIVATE -fapplication-extension -Wl,-e,_NSExtensionMain)
+
+    add_dependencies(Notepad NotepadThumbnail NotepadPreview)
+
+    set(_lsregister /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister)
+    set(_thumb_ent ${CMAKE_CURRENT_SOURCE_DIR}/mac/ThumbnailExtension/Thumbnail.entitlements)
+    set(_prev_ent ${CMAKE_CURRENT_SOURCE_DIR}/mac/PreviewExtension/Preview.entitlements)
+    set(_plugins $<TARGET_BUNDLE_DIR:Notepad>/Contents/PlugIns)
+
+    # Embed the extensions, sign nested-first, then register with Launch Services
+    # and reset the Quick Look cache so Finder picks them up immediately.
+    add_custom_command(TARGET Notepad POST_BUILD
+        COMMENT "Embedding + signing + registering Quick Look extensions"
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_plugins}
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_plugins}/NotepadThumbnail.appex
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                $<TARGET_BUNDLE_DIR:NotepadThumbnail> ${_plugins}/NotepadThumbnail.appex
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_plugins}/NotepadPreview.appex
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                $<TARGET_BUNDLE_DIR:NotepadPreview> ${_plugins}/NotepadPreview.appex
+        COMMAND codesign --force --options runtime --timestamp=none
+                --entitlements ${_thumb_ent} --sign ${NOTEPAD_SIGN_IDENTITY}
+                ${_plugins}/NotepadThumbnail.appex
+        COMMAND codesign --force --options runtime --timestamp=none
+                --entitlements ${_prev_ent} --sign ${NOTEPAD_SIGN_IDENTITY}
+                ${_plugins}/NotepadPreview.appex
+        # No hardened runtime on the app itself: it loads externally-signed Qt
+        # frameworks (different Team ID), which library validation would block.
+        COMMAND codesign --force --timestamp=none
+                --sign ${NOTEPAD_SIGN_IDENTITY} $<TARGET_BUNDLE_DIR:Notepad>
+        COMMAND ${_lsregister} -f $<TARGET_BUNDLE_DIR:Notepad>
+        COMMAND qlmanage -r
+        COMMAND qlmanage -r cache
+        VERBATIM)
+endif()
 
 install(TARGETS Notepad
     BUNDLE  DESTINATION .

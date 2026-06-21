@@ -54,7 +54,7 @@
 #include <cmath>
 
 namespace {
-constexpr quint32 kNoteVersion = 2;   // v2 adds an embedded-font section
+constexpr quint32 kNoteVersion = 3;   // v2 adds fonts; v3 adds a preview image
 const char *kNoteMagic = "PPNOTE";
 } // namespace
 
@@ -627,9 +627,23 @@ bool MainWindow::writeNote(const QString &path)
             if (it.fragment().isValid())
                 considerFamily(it.fragment().charFormat().font().family());
 
+    // Render a preview image of page 1 so Finder/Quick Look (and the Windows/
+    // Linux thumbnailers later) can show the document's contents. Stored right
+    // after the version so a non-Qt parser can reach it without decoding html.
+    QByteArray previewPng;
+    {
+        const QImage preview = m_editor->renderPreview(512);
+        if (!preview.isNull()) {
+            QBuffer buf(&previewPng);
+            buf.open(QIODevice::WriteOnly);
+            preview.save(&buf, "PNG");
+        }
+    }
+
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_6_5);
     out << QByteArray(kNoteMagic) << kNoteVersion;
+    out << previewPng;
     out << m_editor->document()->toHtml();
     out << static_cast<quint32>(images.size());
     for (const auto &img : images)
@@ -663,6 +677,11 @@ bool MainWindow::readNote(const QString &path)
         QMessageBox::warning(this, tr("Notepad"),
                              tr("%1 is not a valid Notepad note.").arg(QFileInfo(path).fileName()));
         return false;
+    }
+
+    if (version >= 3) {
+        QByteArray previewPng;     // regenerated on next save; not needed for editing
+        in >> previewPng;
     }
 
     QString html;

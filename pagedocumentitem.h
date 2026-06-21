@@ -21,10 +21,14 @@ class QGraphicsSceneDragDropEvent;
 // real gaps between pages so a line never straddles a page break. Editing is
 // driven through a managed QTextCursor; the caret and selection are rendered by
 // Qt's own layout via QAbstractTextDocumentLayout::PaintContext.
+class QTextFrame;
+
 class PageDocumentItem : public QGraphicsObject
 {
     Q_OBJECT
 public:
+    enum class WrapMode { Inline, FloatLeft, FloatRight };
+
     explicit PageDocumentItem(QGraphicsItem *parent = nullptr);
 
     QRectF boundingRect() const override;
@@ -47,6 +51,10 @@ public:
     void setBaseFont(const QFont &font);
     void insertImage(const QImage &image);
     void documentReset();          // call after loading new content into document()
+
+    // Render page 1 (white sheet + first-page text) to an image, for the .note
+    // thumbnail/Quick Look preview. maxWidthPx is the output width.
+    QImage renderPreview(int maxWidthPx) const;
 
     // Find / replace helpers (used by the Find bar).
     bool find(const QString &text, QTextDocument::FindFlags flags);
@@ -90,6 +98,7 @@ protected:
     void dragEnterEvent(QGraphicsSceneDragDropEvent *event) override;
     void dragMoveEvent(QGraphicsSceneDragDropEvent *event) override;
     void dropEvent(QGraphicsSceneDragDropEvent *event) override;
+    void contextMenuEvent(QGraphicsSceneContextMenuEvent *event) override;
 
 private:
     qreal textW() const { return m_sheetSize.width() - m_margins.left() - m_margins.right(); }
@@ -98,12 +107,17 @@ private:
     QRectF textRect(int page) const;
     int documentPositionAt(const QPointF &itemPos) const;
 
-    // Image selection / resize helpers.
+    // Image selection / resize / wrap helpers.
     QTextImageFormat imageFormatAt(int pos) const;
+    QRectF docRectToItem(const QRectF &docRect) const;
     QRectF imageItemRect(int imagePos) const;
     int imageAt(const QPointF &itemPos) const;        // fragment start, or -1
-    static QPointF handlePoint(const QRectF &rect, int index);
-    int handleAt(const QPointF &itemPos) const;        // 0..7, or -1
+    QTextFrame *imageFrameAt(int pos) const;          // floating frame, or nullptr
+    int imageInFrame(QTextFrame *frame) const;        // image fragment pos in a frame
+    WrapMode wrapModeOf(int imagePos) const;
+    void changeWrapMode(int imagePos, WrapMode mode);
+    static QPointF handlePoint(const QRectF &rect, int index);  // index 3=R, 4=BR, 5=B
+    int handleAt(const QPointF &itemPos) const;        // 3/4/5, or -1
     void applyImageSize(int imagePos, qreal w, qreal h);
     void clearImageSelection();
 

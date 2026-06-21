@@ -6,11 +6,13 @@
 #include <QDateTime>
 #include <QFileInfo>
 #include <QFocusEvent>
+#include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneDragDropEvent>
 #include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMimeData>
 #include <QPainter>
 #include <QPalette>
@@ -18,6 +20,7 @@
 #include <QTextBlock>
 #include <QTextDocumentFragment>
 #include <QTextFragment>
+#include <QTextFrame>
 #include <QTextImageFormat>
 #include <QTextLayout>
 #include <QUrl>
@@ -181,7 +184,7 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
             painter->drawRect(r);
             painter->setPen(QPen(accent.darker(120), 1));
             painter->setBrush(Qt::white);
-            for (int i = 0; i < 8; ++i) {
+            for (int i : {3, 4, 5}) {
                 const QPointF p = handlePoint(r, i);
                 painter->drawRect(QRectF(p.x() - 4, p.y() - 4, 8, 8));
             }
@@ -277,6 +280,14 @@ QTextImageFormat PageDocumentItem::imageFormatAt(int pos) const
     return QTextImageFormat();
 }
 
+QRectF PageDocumentItem::docRectToItem(const QRectF &d) const
+{
+    const qreal th = textH();
+    const int page = qBound(0, static_cast<int>(d.top() / th), m_pageCount - 1);
+    const QRectF tr = textRect(page);
+    return QRectF(tr.left() + d.left(), tr.top() + (d.top() - page * th), d.width(), d.height());
+}
+
 QRectF PageDocumentItem::imageItemRect(int imagePos) const
 {
     const QTextBlock block = m_doc->findBlock(imagePos);
@@ -295,6 +306,13 @@ QRectF PageDocumentItem::imageItemRect(int imagePos) const
         }
     }
 
+    // Floating image: take its rect from the laid-out frame.
+    if (QTextFrame *frame = imageFrameAt(imagePos)) {
+        const qreal m = frame->frameFormat().margin();
+        const QRectF fr = m_doc->documentLayout()->frameBoundingRect(frame);
+        return docRectToItem(QRectF(fr.left() + m, fr.top() + m, w, h));
+    }
+
     const QRectF blockRect = m_doc->documentLayout()->blockBoundingRect(block);
     qreal docX = blockRect.left();
     qreal docY = blockRect.top();
@@ -309,38 +327,126 @@ QRectF PageDocumentItem::imageItemRect(int imagePos) const
                 docY += extra;
         }
     }
+    return docRectToItem(QRectF(docX, docY, w, h));
+}
 
-    const qreal th = textH();
-    const int page = qBound(0, static_cast<int>(docY / th), m_pageCount - 1);
-    const QRectF tr = textRect(page);
-    return QRectF(tr.left() + docX, tr.top() + (docY - page * th), w, h);
+QTextFrame *PageDocumentItem::imageFrameAt(int pos) const
+{
+    const auto frames = m_doc->rootFrame()->childFrames();
+    for (QTextFrame *f : frames) {
+        if (f->frameFormat().position() != QTextFrameFormat::InFlow
+            && pos >= f->firstPosition() && pos <= f->lastPosition())
+            return f;
+    }
+    return nullptr;
 }
 
 int PageDocumentItem::imageAt(const QPointF &itemPos) const
 {
+    // Inline images in the block under the point.
     const QTextBlock block = m_doc->findBlock(documentPositionAt(itemPos));
-    if (!block.isValid())
-        return -1;
-    for (auto it = block.begin(); !it.atEnd(); ++it) {
-        const QTextFragment frag = it.fragment();
-        if (frag.isValid() && frag.charFormat().isImageFormat()
-            && imageItemRect(frag.position()).contains(itemPos))
-            return frag.position();
+    if (block.isValid()) {
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (frag.isValid() && frag.charFormat().isImageFormat()
+                && imageItemRect(frag.position()).contains(itemPos))
+                return frag.position();
+        }
+    }
+    // Floating images live in child frames, outside the normal block flow.
+    const auto frames = m_doc->rootFrame()->childFrames();
+    for (QTextFrame *frame : frames) {
+        if (frame->frameFormat().position() == QTextFrameFormat::InFlow)
+            continue;
+        const int imgPos = imageInFrame(frame);
+        if (imgPos >= 0 && imageItemRect(imgPos).contains(itemPos))
+            return imgPos;
     }
     return -1;
 }
 
+int PageDocumentItem::imageInFrame(QTextFrame *frame) const
+{
+    if (!frame)
+        return -1;
+    for (auto it = frame->begin(); !it.atEnd(); ++it) {
+        const QTextBlock b = it.currentBlock();
+        if (!b.isValid())
+            continue;
+        for (auto fit = b.begin(); !fit.atEnd(); ++fit) {
+            const QTextFragment frag = fit.fragment();
+            if (frag.isValid() && frag.charFormat().isImageFormat())
+                return frag.position();
+        }
+    }
+    return -1;
+}
+
+PageDocumentItem::WrapMode PageDocumentItem::wrapModeOf(int imagePos) const
+{
+    QTextFrame *f = imageFrameAt(imagePos);
+    if (!f)
+        return WrapMode::Inline;
+    return f->frameFormat().position() == QTextFrameFormat::FloatRight ? WrapMode::FloatRight
+                                                                       : WrapMode::FloatLeft;
+}
+
+void PageDocumentItem::changeWrapMode(int imagePos, WrapMode mode)
+{
+    const WrapMode current = wrapModeOf(imagePos);
+    if (current == mode)
+        return;
+    QTextImageFormat fmt = imageFormatAt(imagePos);
+    if (fmt.name().isEmpty())
+        return;
+
+    m_cursor.beginEditBlock();
+    QTextFrame *frame = imageFrameAt(imagePos);
+
+    if (mode == WrapMode::Inline) {                 // float -> inline
+        QTextCursor c(m_doc);
+        c.setPosition(frame->firstPosition() - 1);
+        c.setPosition(frame->lastPosition() + 1, QTextCursor::KeepAnchor);
+        c.removeSelectedText();
+        c.insertImage(fmt);
+        m_selectedImagePos = c.position() - 1;
+    } else if (current == WrapMode::Inline) {        // inline -> float
+        QTextCursor c(m_doc);
+        c.setPosition(imagePos);
+        c.setPosition(imagePos + 1, QTextCursor::KeepAnchor);
+        c.removeSelectedText();
+        QTextFrameFormat ff;
+        ff.setPosition(mode == WrapMode::FloatLeft ? QTextFrameFormat::FloatLeft
+                                                   : QTextFrameFormat::FloatRight);
+        ff.setBorder(0);
+        ff.setMargin(8);
+        ff.setWidth(QTextLength(QTextLength::FixedLength, fmt.width() > 0 ? fmt.width() : 120));
+        QTextFrame *nf = c.insertFrame(ff);
+        nf->firstCursorPosition().insertImage(fmt);
+        m_selectedImagePos = imageInFrame(nf);
+    } else {                                         // float-left <-> float-right
+        QTextFrameFormat ff = frame->frameFormat();
+        ff.setPosition(mode == WrapMode::FloatLeft ? QTextFrameFormat::FloatLeft
+                                                   : QTextFrameFormat::FloatRight);
+        frame->setFrameFormat(ff);
+        m_selectedImagePos = imagePos;
+    }
+
+    m_cursor.endEditBlock();
+    recomputePages();
+    emit contentsChanged();
+    notifyCursorUi();
+    update();
+}
+
+// Only the right / bottom / corner handles resize sanely (a flowed image's
+// top-left is pinned by the layout), so we expose just those three.
 QPointF PageDocumentItem::handlePoint(const QRectF &r, int index)
 {
     switch (index) {
-    case 0: return r.topLeft();
-    case 1: return QPointF(r.center().x(), r.top());
-    case 2: return r.topRight();
-    case 3: return QPointF(r.right(), r.center().y());
-    case 4: return r.bottomRight();
-    case 5: return QPointF(r.center().x(), r.bottom());
-    case 6: return r.bottomLeft();
-    default: return QPointF(r.left(), r.center().y());   // 7
+    case 3:  return QPointF(r.right(), r.center().y());   // right edge
+    case 5:  return QPointF(r.center().x(), r.bottom());  // bottom edge
+    default: return r.bottomRight();                      // 4: corner
     }
 }
 
@@ -349,9 +455,9 @@ int PageDocumentItem::handleAt(const QPointF &itemPos) const
     if (m_selectedImagePos < 0)
         return -1;
     const QRectF r = imageItemRect(m_selectedImagePos);
-    for (int i = 0; i < 8; ++i) {
+    for (int i : {4, 3, 5}) {   // prefer the corner
         const QPointF p = handlePoint(r, i);
-        if (QRectF(p.x() - 6, p.y() - 6, 12, 12).contains(itemPos))
+        if (QRectF(p.x() - 7, p.y() - 7, 14, 14).contains(itemPos))
             return i;
     }
     return -1;
@@ -362,12 +468,20 @@ void PageDocumentItem::applyImageSize(int imagePos, qreal w, qreal h)
     QTextImageFormat fmt = imageFormatAt(imagePos);
     if (fmt.name().isEmpty())
         return;
-    fmt.setWidth(qRound(qMax(16.0, w)));
-    fmt.setHeight(qRound(qMax(16.0, h)));
+    w = qMax(16.0, w);
+    h = qMax(16.0, h);
+    fmt.setWidth(qRound(w));
+    fmt.setHeight(qRound(h));
     QTextCursor c(m_doc);
     c.setPosition(imagePos);
     c.setPosition(imagePos + 1, QTextCursor::KeepAnchor);
     c.setCharFormat(fmt);
+    // Keep the floating frame box in step with the image.
+    if (QTextFrame *frame = imageFrameAt(imagePos)) {
+        QTextFrameFormat ff = frame->frameFormat();
+        ff.setWidth(QTextLength(QTextLength::FixedLength, qRound(w)));
+        frame->setFrameFormat(ff);
+    }
     update();
 }
 
@@ -481,20 +595,72 @@ void PageDocumentItem::setBaseFont(const QFont &font)
 
 void PageDocumentItem::insertImage(const QImage &image)
 {
-    QImage img = image;
-    const double maxW = textW();
-    if (maxW > 0 && img.width() > maxW)
-        img = img.scaledToWidth(static_cast<int>(maxW), Qt::SmoothTransformation);
+    if (image.isNull())
+        return;
+
+    // Keep the image at (near) full resolution so it stays crisp when shown
+    // small or zoomed in — only the *display* size is fit to the page width.
+    // A generous cap bounds memory/file size for very large originals.
+    constexpr int kMaxStored = 3000;
+    QImage stored = image;
+    if (stored.width() > kMaxStored)
+        stored = stored.scaledToWidth(kMaxStored, Qt::SmoothTransformation);
 
     const QString name = QStringLiteral("img://%1.png").arg(QDateTime::currentMSecsSinceEpoch());
-    m_doc->addResource(QTextDocument::ImageResource, QUrl(name), img);
+    m_doc->addResource(QTextDocument::ImageResource, QUrl(name), stored);
+
+    qreal w = stored.width();
+    qreal h = stored.height();
+    const qreal maxW = textW();
+    if (maxW > 0 && w > maxW) {
+        h *= maxW / w;       // fit to text width, preserving aspect
+        w = maxW;
+    }
 
     QTextImageFormat fmt;
     fmt.setName(name);
-    fmt.setWidth(img.width());
-    fmt.setHeight(img.height());
+    fmt.setWidth(w);
+    fmt.setHeight(h);
     m_cursor.insertImage(fmt);
     afterCursorMoved();
+}
+
+QImage PageDocumentItem::renderPreview(int maxWidthPx) const
+{
+    const qreal sheetW = m_sheetSize.width();
+    const qreal sheetH = m_sheetSize.height();
+    if (sheetW <= 0 || sheetH <= 0 || maxWidthPx <= 0)
+        return QImage();
+
+    const qreal scale = maxWidthPx / sheetW;
+    QImage img(QSize(maxWidthPx, qRound(sheetH * scale)), QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::white);
+
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p.scale(scale, scale);
+
+    // The white sheet with a hairline border.
+    p.setBrush(Qt::white);
+    p.setPen(QPen(QColor(220, 220, 220), 1));
+    p.drawRect(QRectF(0, 0, sheetW, sheetH));
+
+    // Page 1's slice of the document, inset by the margins.
+    const QRectF tr(m_margins.left(), m_margins.top(), textW(), textH());
+    p.save();
+    p.setClipRect(tr);
+    p.translate(tr.topLeft());
+    QAbstractTextDocumentLayout::PaintContext ctx;
+    QPalette pal;
+    pal.setColor(QPalette::Text, Qt::black);
+    ctx.palette = pal;
+    ctx.clip = QRectF(0, 0, textW(), textH());
+    m_doc->documentLayout()->draw(&p, ctx);
+    p.restore();
+    p.end();
+    return img;
 }
 
 // --------------------------------------------------------------- find / replace
@@ -812,4 +978,40 @@ void PageDocumentItem::dropEvent(QGraphicsSceneDragDropEvent *event)
         event->acceptProposedAction();
     else
         event->ignore();
+}
+
+void PageDocumentItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
+{
+    const int imgPos = imageAt(event->pos());
+    if (imgPos < 0) {
+        event->ignore();
+        return;
+    }
+    setFocus();
+    m_selectedImagePos = imgPos;
+    update();
+
+    const WrapMode current = wrapModeOf(imgPos);
+    QMenu menu;
+    auto *header = menu.addAction(tr("Text wrapping"));
+    header->setEnabled(false);
+    menu.addSeparator();
+    struct { const char *label; WrapMode mode; } items[] = {
+        {QT_TR_NOOP("Inline with text"), WrapMode::Inline},
+        {QT_TR_NOOP("Wrap left (text on right)"), WrapMode::FloatLeft},
+        {QT_TR_NOOP("Wrap right (text on left)"), WrapMode::FloatRight},
+    };
+    QList<QAction *> actions;
+    for (const auto &item : items) {
+        auto *a = menu.addAction(tr(item.label));
+        a->setCheckable(true);
+        a->setChecked(current == item.mode);
+        actions.append(a);
+    }
+
+    QAction *chosen = menu.exec(event->screenPos());
+    for (int i = 0; i < actions.size(); ++i)
+        if (chosen == actions.at(i))
+            changeWrapMode(imgPos, items[i].mode);
+    event->accept();
 }
