@@ -17,6 +17,8 @@ public:
     void activate();          // show, focus and select the find field
 
 signals:
+    // Emitted live as the find text / options change, for highlighting all matches.
+    void highlightRequested(const QString &text, bool caseSensitive, bool wholeWords);
     void findRequested(const QString &text, bool forward, bool caseSensitive, bool wholeWords);
     void replaceRequested(const QString &text, const QString &with, bool caseSensitive,
                           bool wholeWords);

@@ -55,6 +55,7 @@ PageDocumentItem::PageDocumentItem(QGraphicsItem *parent)
     m_typingFormat = m_cursor.charFormat();
 
     connect(m_doc, &QTextDocument::contentsChanged, this, [this] {
+        recomputeSearchMatches();   // keep highlight-all accurate while editing
         recomputePages();
         emit contentsChanged();
     });
@@ -163,6 +164,20 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
         ctx.clip = QRectF(0, page * th, textW(), th);
         if (m_focused && m_caretOn && !m_cursor.hasSelection())
             ctx.cursorPosition = m_cursor.position();
+
+        // Find: highlight every match in yellow (drawn first, under the caret
+        // selection so the active match still stands out).
+        if (!m_searchMatches.isEmpty()) {
+            QTextCharFormat hl;
+            hl.setBackground(QColor(255, 230, 64));
+            hl.setForeground(Qt::black);
+            for (const QTextCursor &match : m_searchMatches) {
+                QAbstractTextDocumentLayout::Selection sel;
+                sel.cursor = match;
+                sel.format = hl;
+                ctx.selections.append(sel);
+            }
+        }
         if (m_cursor.hasSelection()) {
             QAbstractTextDocumentLayout::Selection sel;
             sel.cursor = m_cursor;
@@ -664,6 +679,32 @@ QImage PageDocumentItem::renderPreview(int maxWidthPx) const
 }
 
 // --------------------------------------------------------------- find / replace
+
+void PageDocumentItem::setSearchHighlight(const QString &text, QTextDocument::FindFlags flags)
+{
+    m_searchText = text;
+    m_searchFlags = flags;
+    recomputeSearchMatches();
+    update();
+}
+
+void PageDocumentItem::recomputeSearchMatches()
+{
+    m_searchMatches.clear();
+    if (m_searchText.isEmpty())
+        return;
+    const QTextDocument::FindFlags flags = m_searchFlags & ~QTextDocument::FindBackward;
+    QTextCursor c(m_doc);
+    int guard = 0;
+    forever {
+        c = m_doc->find(m_searchText, c, flags);
+        if (c.isNull())
+            break;
+        m_searchMatches.append(c);
+        if (++guard >= 5000)   // safety cap for pathological documents
+            break;
+    }
+}
 
 bool PageDocumentItem::find(const QString &text, QTextDocument::FindFlags flags)
 {

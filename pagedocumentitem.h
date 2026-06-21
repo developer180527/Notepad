@@ -2,8 +2,10 @@
 #define PAGEDOCUMENTITEM_H
 
 #include <QGraphicsObject>
+#include <QList>
 #include <QMarginsF>
 #include <QSizeF>
+#include <QString>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -55,6 +57,9 @@ public:
     // Render page 1 (white sheet + first-page text) to an image, for the .note
     // thumbnail/Quick Look preview. maxWidthPx is the output width.
     QImage renderPreview(int maxWidthPx) const;
+
+    // Highlight every occurrence of text (in yellow). Empty text clears it.
+    void setSearchHighlight(const QString &text, QTextDocument::FindFlags flags);
 
     // Find / replace helpers (used by the Find bar).
     bool find(const QString &text, QTextDocument::FindFlags flags);
@@ -122,6 +127,7 @@ private:
     void clearImageSelection();
 
     void recomputePages();
+    void recomputeSearchMatches();
     void setCursorAndNotify(const QTextCursor &cursor);
     void afterCursorMoved();        // re-sync typing format from cursor + notify
     void notifyCursorUi();
@@ -139,6 +145,11 @@ private:
     bool m_caretOn = true;
     bool m_focused = false;
     bool m_selecting = false;
+
+    // Find: highlight-all state.
+    QList<QTextCursor> m_searchMatches;
+    QString m_searchText;
+    QTextDocument::FindFlags m_searchFlags;
 
     // Image selection / resize state.
     int m_selectedImagePos = -1;

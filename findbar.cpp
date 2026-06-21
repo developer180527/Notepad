@@ -27,6 +27,7 @@ FindBar::FindBar(QWidget *parent)
 
     m_case = new QCheckBox(tr("Aa"), this);
     m_case->setToolTip(tr("Case sensitive"));
+    m_case->setChecked(true);   // match exactly what's typed by default ("a" != "A")
     m_whole = new QCheckBox(tr("Word"), this);
     m_whole->setToolTip(tr("Whole words"));
 
@@ -60,6 +61,14 @@ FindBar::FindBar(QWidget *parent)
     connect(next, &QToolButton::clicked, this, [this] { emitFind(true); });
     connect(prev, &QToolButton::clicked, this, [this] { emitFind(false); });
     connect(m_find, &QLineEdit::returnPressed, this, [this] { emitFind(true); });
+
+    // Live highlight-all as the query or options change.
+    auto emitHighlight = [this] {
+        emit highlightRequested(m_find->text(), caseSensitive(), wholeWords());
+    };
+    connect(m_find, &QLineEdit::textChanged, this, [emitHighlight](const QString &) { emitHighlight(); });
+    connect(m_case, &QCheckBox::toggled, this, [emitHighlight](bool) { emitHighlight(); });
+    connect(m_whole, &QCheckBox::toggled, this, [emitHighlight](bool) { emitHighlight(); });
     connect(replaceOne, &QToolButton::clicked, this, [this] {
         emit replaceRequested(m_find->text(), m_replace->text(), caseSensitive(), wholeWords());
     });

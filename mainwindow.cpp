@@ -314,7 +314,14 @@ void MainWindow::connectActions()
                 const int n = m_editor->replaceAll(text, with, findFlags(true, cs, whole));
                 statusBar()->showMessage(tr("Replaced %n occurrence(s)", nullptr, n), 2500);
             });
-    connect(m_findBar, &FindBar::closed, this, [this] { m_editor->setFocus(); });
+    connect(m_findBar, &FindBar::highlightRequested, this,
+            [this, findFlags](const QString &text, bool cs, bool whole) {
+                m_editor->setSearchHighlight(text, findFlags(true, cs, whole));
+            });
+    connect(m_findBar, &FindBar::closed, this, [this] {
+        m_editor->setSearchHighlight(QString(), {});   // clear yellow highlights
+        m_editor->setFocus();
+    });
 
     // Insert
     connect(ui->actionInsertImage, &QAction::triggered, this, &MainWindow::insertImage);
