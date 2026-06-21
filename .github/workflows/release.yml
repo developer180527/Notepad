@@ -111,8 +111,9 @@ jobs:
         run: |
           DESTDIR="$PWD/AppDir" cmake --install build
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          convert -size 256x256 xc:'#2d5fa0' -fill white -gravity center \
-                  -pointsize 150 -annotate 0 'N' \
+          # Placeholder icon drawn from shape primitives (no font dependency).
+          convert -size 256x256 xc:'#2d5fa0' -fill white \
+                  -draw "roundrectangle 70,40 186,216 10,10" \
                   AppDir/usr/share/icons/hicolor/256x256/apps/notepad.png
 
       - name: Build AppImage
