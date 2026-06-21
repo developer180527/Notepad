@@ -41,6 +41,11 @@ jobs:
       - name: Deploy Qt & package
         run: |
           macdeployqt build/Notepad.app -verbose=1
+          # macdeployqt adds the Qt frameworks AFTER the build's ad-hoc signing,
+          # invalidating the signature — re-sign the whole bundle or arm64 macOS
+          # SIGKILLs it on launch ("Code Signature Invalid").
+          codesign --force --deep --sign - build/Notepad.app
+          codesign --verify --deep --strict build/Notepad.app
           ditto -c -k --keepParent build/Notepad.app Notepad-macos.zip
 
       - uses: actions/upload-artifact@v4
