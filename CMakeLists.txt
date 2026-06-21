@@ -165,9 +165,13 @@ install(TARGETS Notepad
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-qt_generate_deploy_app_script(
-    TARGET Notepad
-    OUTPUT_SCRIPT deploy_script
-    NO_UNSUPPORTED_PLATFORM_ERROR
-)
-install(SCRIPT ${deploy_script})
+# Qt's deploy script (used by `cmake --install`) misbehaves on Linux; there we
+# package with linuxdeploy/AppImage instead. Keep it for macOS/Windows.
+if(APPLE OR WIN32)
+    qt_generate_deploy_app_script(
+        TARGET Notepad
+        OUTPUT_SCRIPT deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    install(SCRIPT ${deploy_script})
+endif()
