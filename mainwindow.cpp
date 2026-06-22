@@ -24,6 +24,7 @@
 #include <QFontComboBox>
 #include <QGraphicsScene>
 #include <QImage>
+#include <QIntValidator>
 #include <QLabel>
 #include <QList>
 #include <QMenuBar>
@@ -193,6 +194,8 @@ void MainWindow::setupToolBar()
     m_sizeCombo = new QComboBox(tb);
     m_sizeCombo->setEditable(true);
     m_sizeCombo->setInsertPolicy(QComboBox::NoInsert);
+    // Numbers only — block any non-digit input in the editable field.
+    m_sizeCombo->setValidator(new QIntValidator(1, 999, m_sizeCombo));
     for (int s : {8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72})
         m_sizeCombo->addItem(QString::number(s));
     m_sizeCombo->setCurrentText(QStringLiteral("12"));
@@ -833,9 +836,10 @@ void MainWindow::onFontFamilyChanged(const QFont &font)
 {
     if (m_updatingControls)
         return;
-    m_baseFontFamily = font.family();
-    applyBaseFont();
-    m_editor->setFocus();
+    // Apply to the selection only (no-op without one), like B/I/U.
+    QTextCharFormat fmt;
+    fmt.setFontFamilies({font.family()});
+    mergeFormatOnSelection(fmt);
 }
 
 void MainWindow::onFontSizeChanged(const QString &text)
@@ -846,9 +850,9 @@ void MainWindow::onFontSizeChanged(const QString &text)
     const qreal pt = text.trimmed().toDouble(&ok);
     if (!ok || pt <= 0)
         return;
-    m_baseFontSize = pt;
-    applyBaseFont();
-    m_editor->setFocus();
+    QTextCharFormat fmt;
+    fmt.setFontPointSize(pt);
+    mergeFormatOnSelection(fmt);
 }
 
 void MainWindow::applyBaseFont()

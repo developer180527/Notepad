@@ -96,7 +96,10 @@ QRectF PageDocumentItem::boundingRect() const
 
 void PageDocumentItem::recomputePages()
 {
-    m_doc->setPageSize(QSizeF(textW(), textH()));
+    // Note: do NOT setPageSize here — it can force a full document relayout, and
+    // this runs on every edit. The page size only changes via Page Setup
+    // (setPageLayoutMetrics) and the constructor. pageCount() already reflects
+    // the current content under the fixed page size.
     const int pc = qMax(1, m_doc->pageCount());
     if (pc != m_pageCount) {
         prepareGeometryChange();
@@ -113,6 +116,7 @@ void PageDocumentItem::setPageLayoutMetrics(const QSizeF &sheetPx, const QMargin
     m_sheetSize = sheetPx;
     m_margins = marginsPx;
     m_gap = gapPx;
+    m_doc->setPageSize(QSizeF(textW(), textH()));   // only when the layout changes
     recomputePages();
     emit ensureVisibleRequested(caretSceneRect());
 }
@@ -138,6 +142,10 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
 
     painter->setRenderHint(QPainter::Antialiasing, true);
     painter->setRenderHint(QPainter::TextAntialiasing, true);
+
+    QTextCharFormat searchFmt;
+    searchFmt.setBackground(QColor(255, 230, 64));
+    searchFmt.setForeground(Qt::black);
 
     for (int page = first; page <= last; ++page) {
         const QRectF sheet = sheetRect(page);
@@ -165,18 +173,14 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
         if (m_focused && m_caretOn && !m_cursor.hasSelection())
             ctx.cursorPosition = m_cursor.position();
 
-        // Find: highlight every match in yellow (drawn first, under the caret
-        // selection so the active match still stands out).
-        if (!m_searchMatches.isEmpty()) {
-            QTextCharFormat hl;
-            hl.setBackground(QColor(255, 230, 64));
-            hl.setForeground(Qt::black);
-            for (const QTextCursor &match : m_searchMatches) {
-                QAbstractTextDocumentLayout::Selection sel;
-                sel.cursor = match;
-                sel.format = hl;
-                ctx.selections.append(sel);
-            }
+        // Find: highlight this page's matches in yellow (drawn first, under the
+        // caret selection so the active match still stands out).
+        const QList<QTextCursor> pageMatches = m_matchesByPage.value(page);
+        for (const QTextCursor &match : pageMatches) {
+            QAbstractTextDocumentLayout::Selection sel;
+            sel.cursor = match;
+            sel.format = searchFmt;
+            ctx.selections.append(sel);
         }
         if (m_cursor.hasSelection()) {
             QAbstractTextDocumentLayout::Selection sel;
@@ -581,9 +585,14 @@ void PageDocumentItem::selectAll()
 
 void PageDocumentItem::mergeFormatOnSelection(const QTextCharFormat &format)
 {
-    if (m_cursor.hasSelection())
-        m_cursor.mergeCharFormat(format);
-    m_typingFormat.merge(format);
+    // Character formatting applies to the selection only. With no selection,
+    // do nothing and re-sync the toolbar so the toggled control snaps back.
+    if (!m_cursor.hasSelection()) {
+        notifyCursorUi();
+        return;
+    }
+    m_cursor.mergeCharFormat(format);
+    m_typingFormat = m_cursor.charFormat();
     notifyCursorUi();
     update();
 }
@@ -690,7 +699,7 @@ void PageDocumentItem::setSearchHighlight(const QString &text, QTextDocument::Fi
 
 void PageDocumentItem::recomputeSearchMatches()
 {
-    m_searchMatches.clear();
+    m_matchesByPage.clear();
     if (m_searchText.isEmpty())
         return;
     const QTextDocument::FindFlags flags = m_searchFlags & ~QTextDocument::FindBackward;
@@ -700,10 +709,25 @@ void PageDocumentItem::recomputeSearchMatches()
         c = m_doc->find(m_searchText, c, flags);
         if (c.isNull())
             break;
-        m_searchMatches.append(c);
+        m_matchesByPage[pageForPosition(c.selectionStart())].append(c);
         if (++guard >= 5000)   // safety cap for pathological documents
             break;
     }
+}
+
+int PageDocumentItem::pageForPosition(int pos) const
+{
+    const QTextBlock block = m_doc->findBlock(pos);
+    if (!block.isValid())
+        return 0;
+    qreal y = m_doc->documentLayout()->blockBoundingRect(block).top();
+    if (QTextLayout *layout = block.layout()) {
+        const QTextLine line = layout->lineForTextPosition(pos - block.position());
+        if (line.isValid())
+            y += line.y();
+    }
+    const qreal th = textH();
+    return th > 0 ? qMax(0, static_cast<int>(y / th)) : 0;
 }
 
 bool PageDocumentItem::find(const QString &text, QTextDocument::FindFlags flags)

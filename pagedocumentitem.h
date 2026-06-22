@@ -2,6 +2,7 @@
 #define PAGEDOCUMENTITEM_H
 
 #include <QGraphicsObject>
+#include <QHash>
 #include <QList>
 #include <QMarginsF>
 #include <QSizeF>
@@ -111,6 +112,7 @@ private:
     QRectF sheetRect(int page) const;
     QRectF textRect(int page) const;
     int documentPositionAt(const QPointF &itemPos) const;
+    int pageForPosition(int pos) const;
 
     // Image selection / resize / wrap helpers.
     QTextImageFormat imageFormatAt(int pos) const;
@@ -146,8 +148,9 @@ private:
     bool m_focused = false;
     bool m_selecting = false;
 
-    // Find: highlight-all state.
-    QList<QTextCursor> m_searchMatches;
+    // Find: highlight-all state. Matches are bucketed by page so painting a page
+    // only iterates its own matches (not every match in the document).
+    QHash<int, QList<QTextCursor>> m_matchesByPage;
     QString m_searchText;
     QTextDocument::FindFlags m_searchFlags;
 
