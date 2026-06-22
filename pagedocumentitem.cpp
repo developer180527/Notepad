@@ -3,6 +3,7 @@
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QClipboard>
+#include <QColorDialog>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QFocusEvent>
@@ -24,6 +25,8 @@
 #include <QTextImageFormat>
 #include <QTextLayout>
 #include <QTextTable>
+#include <QTextTableCell>
+#include <QTextTableCellFormat>
 #include <QUrl>
 #include <QTimer>
 #include <QUrl>
@@ -1101,7 +1104,10 @@ void PageDocumentItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
         probe.setPosition(documentPositionAt(event->pos()));
         if (QTextTable *table = probe.currentTable()) {
             setFocus();
-            m_cursor = probe;
+            // Keep an existing multi-cell selection (so Cell Color applies to all
+            // of them); otherwise move the caret to the clicked cell.
+            if (!(m_cursor.currentTable() == table && m_cursor.hasComplexSelection()))
+                m_cursor = probe;
             const QTextTableCell cell = table->cellAt(m_cursor);
             const int row = cell.row();
             const int col = cell.column();
@@ -1111,11 +1117,36 @@ void PageDocumentItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
             menu.addSeparator();
             QAction *dr = menu.addAction(tr("Delete Row"));
             QAction *dc = menu.addAction(tr("Delete Column"));
+            menu.addSeparator();
+            QAction *cc = menu.addAction(tr("Cell Color..."));
+            QAction *cn = menu.addAction(tr("Clear Cell Color"));
             QAction *chosen = menu.exec(event->screenPos());
             if (chosen == ir)        table->insertRows(row + 1, 1);
             else if (chosen == ic)   table->insertColumns(col + 1, 1);
             else if (chosen == dr)   table->removeRows(row, 1);
             else if (chosen == dc)   table->removeColumns(col, 1);
+            else if (chosen == cc || chosen == cn) {
+                QColor color;
+                if (chosen == cc) {
+                    const QColor cur = cell.format().background().color();
+                    color = QColorDialog::getColor(cur.isValid() ? cur : QColor(Qt::white),
+                                                   event->widget(), tr("Cell Color"));
+                    if (!color.isValid()) { event->accept(); return; }
+                }
+                // Apply to every selected cell, or just the clicked one.
+                int firstRow = row, firstCol = col, numRows = 1, numCols = 1;
+                if (m_cursor.hasComplexSelection())
+                    m_cursor.selectedTableCells(&firstRow, &numRows, &firstCol, &numCols);
+                for (int r = firstRow; r < firstRow + numRows; ++r) {
+                    for (int c = firstCol; c < firstCol + numCols; ++c) {
+                        QTextTableCell tc = table->cellAt(r, c);
+                        QTextTableCellFormat f = tc.format().toTableCellFormat();
+                        if (chosen == cc) f.setBackground(color);
+                        else              f.clearBackground();
+                        tc.setFormat(f);
+                    }
+                }
+            }
             if (chosen) {
                 recomputePages();
                 emit contentsChanged();

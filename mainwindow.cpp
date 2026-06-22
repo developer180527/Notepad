@@ -13,6 +13,7 @@
 #include <QApplication>
 #include <QBuffer>
 #include <QCloseEvent>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QDataStream>
 #include <QDateTime>
@@ -53,6 +54,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextDocumentFragment>
+#include <QTextFragment>
 #include <QTextImageFormat>
 #include <QToolBar>
 #include <QToolButton>
@@ -214,6 +216,10 @@ void MainWindow::setupToolBar()
     tb->addAction(ui->actionUnderline);
     tb->addSeparator();
 
+    tb->addAction(ui->actionTextColor);
+    tb->addAction(ui->actionHighlightColor);
+    tb->addSeparator();
+
     m_alignGroup = new QActionGroup(this);
     m_alignGroup->setExclusive(true);
     for (QAction *a : {ui->actionAlignLeft, ui->actionAlignCenter,
@@ -368,6 +374,9 @@ void MainWindow::connectActions()
     connect(ui->actionIncreaseFontSize, &QAction::triggered, this, [this] { changeFontSize(+1); });
     connect(ui->actionDecreaseFontSize, &QAction::triggered, this, [this] { changeFontSize(-1); });
 
+    connect(ui->actionTextColor, &QAction::triggered, this, &MainWindow::chooseTextColor);
+    connect(ui->actionHighlightColor, &QAction::triggered, this, &MainWindow::chooseHighlightColor);
+
     connect(ui->actionAlignLeft, &QAction::triggered, this,
             [this] { m_editor->setAlignmentValue(Qt::AlignLeft); });
     connect(ui->actionAlignCenter, &QAction::triggered, this,
@@ -454,6 +463,8 @@ void MainWindow::refreshIcons()
     ui->actionBold->setIcon(IconFactory::bold(c));
     ui->actionItalic->setIcon(IconFactory::italic(c));
     ui->actionUnderline->setIcon(IconFactory::underline(c));
+    ui->actionTextColor->setIcon(IconFactory::textColor(c));
+    ui->actionHighlightColor->setIcon(IconFactory::highlight(c));
     ui->actionAlignLeft->setIcon(IconFactory::alignLeft(c));
     ui->actionAlignCenter->setIcon(IconFactory::alignCenter(c));
     ui->actionAlignRight->setIcon(IconFactory::alignRight(c));
@@ -554,11 +565,78 @@ bool MainWindow::saveFileAs()
     return false;
 }
 
+// True if the document carries formatting that plain text / Markdown can't keep
+// (tables, images, bold/italic/underline, colors, non-default fonts or sizes).
+static bool documentHasRichFormatting(const QTextDocument *doc)
+{
+    if (!doc->rootFrame()->childFrames().isEmpty())
+        return true;   // tables or floating images create child frames
+    const QFont base = doc->defaultFont();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        if (b.blockFormat().headingLevel() > 0 || b.textList())
+            return true;
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.isValid())
+                continue;
+            const QTextCharFormat cf = frag.charFormat();
+            if (cf.isImageFormat())
+                return true;
+            if (cf.fontWeight() > QFont::Normal || cf.fontItalic()
+                || cf.fontUnderline() || cf.fontStrikeOut())
+                return true;
+            if (cf.hasProperty(QTextFormat::ForegroundBrush)
+                && cf.foreground().color() != QColor(Qt::black))
+                return true;
+            if (cf.hasProperty(QTextFormat::BackgroundBrush))
+                return true;
+            if (cf.hasProperty(QTextFormat::FontPointSize)
+                && qAbs(cf.fontPointSize() - base.pointSizeF()) > 0.1)
+                return true;
+            if (cf.hasProperty(QTextFormat::FontFamilies)) {
+                const QStringList fams = cf.property(QTextFormat::FontFamilies).toStringList();
+                if (!fams.isEmpty() && fams.constFirst() != base.family())
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool MainWindow::confirmLossySave(const QString &suffix)
+{
+    const bool isTxt = (suffix == QLatin1String("txt"));
+    const bool isMd  = (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"));
+    if (!isTxt && !isMd)
+        return true;   // .note / .html are lossless
+    if (!documentHasRichFormatting(m_editor->document()))
+        return true;   // nothing would be lost
+
+    const QString detail = isTxt
+        ? tr("Plain text can't store any formatting — colors, fonts, sizes, "
+             "tables and images will be discarded.")
+        : tr("Markdown keeps bold, italic, headings, lists and tables, but "
+             "discards colors, fonts, sizes and images.");
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(tr("Save as %1?").arg(suffix.toUpper()));
+    box.setText(tr("This format loses formatting that a .note file keeps."));
+    box.setInformativeText(detail + QStringLiteral("\n\n")
+                           + tr("Save as .note to preserve everything."));
+    box.setStandardButtons(QMessageBox::Save | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    return box.exec() == QMessageBox::Save;
+}
+
 bool MainWindow::writeToFile(const QString &path)
 {
     const QString suffix = QFileInfo(path).suffix().toLower();
     if (suffix == QLatin1String("note"))
         return writeNote(path);
+
+    if (!confirmLossySave(suffix))
+        return false;
 
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -875,6 +953,39 @@ void MainWindow::changeFontSize(int delta)
         cur = m_baseFontSize;
     QTextCharFormat fmt;
     fmt.setFontPointSize(qBound(1.0, qRound(cur) + qreal(delta), 999.0));
+    mergeFormatOnSelection(fmt);
+}
+
+void MainWindow::chooseTextColor()
+{
+    // Seed the dialog with the selection's current colour, then the last one used.
+    QColor initial = m_editor->currentCharFormat().foreground().color();
+    if (!m_editor->currentCharFormat().hasProperty(QTextFormat::ForegroundBrush))
+        initial = m_lastTextColor.isValid() ? m_lastTextColor : QColor(Qt::black);
+    const QColor c = QColorDialog::getColor(initial, this, tr("Text Color"));
+    if (!c.isValid())
+        return;
+    m_lastTextColor = c;
+    QTextCharFormat fmt;
+    fmt.setForeground(c);
+    mergeFormatOnSelection(fmt);
+}
+
+void MainWindow::chooseHighlightColor()
+{
+    QColor initial = m_lastHighlightColor.isValid() ? m_lastHighlightColor
+                                                     : QColor(255, 255, 0);
+    const QColor c = QColorDialog::getColor(
+        initial, this, tr("Highlight Color"), QColorDialog::ShowAlphaChannel);
+    if (!c.isValid())
+        return;
+    m_lastHighlightColor = c;
+    QTextCharFormat fmt;
+    // Fully transparent acts as "no highlight" (clears any existing background).
+    if (c.alpha() == 0)
+        fmt.setBackground(Qt::NoBrush);
+    else
+        fmt.setBackground(c);
     mergeFormatOnSelection(fmt);
 }
 

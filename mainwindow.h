@@ -1,6 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <QColor>
 #include <QMainWindow>
 #include <QMarginsF>
 #include <QPageLayout>
@@ -62,6 +63,7 @@ private:
     void printDocument();
     bool maybeSave();
     bool writeToFile(const QString &path);
+    bool confirmLossySave(const QString &suffix);   // warn before saving rich doc to txt/md
     bool loadFromFile(const QString &path);
     bool writeNote(const QString &path);
     bool readNote(const QString &path);
@@ -70,6 +72,8 @@ private:
     // --- format ---
     void mergeFormatOnSelection(const QTextCharFormat &format);
     void changeFontSize(int delta);
+    void chooseTextColor();
+    void chooseHighlightColor();
     void onFontFamilyChanged(const QFont &font);
     void onFontSizeChanged(const QString &text);
     void insertImage();
@@ -108,6 +112,8 @@ private:
     QActionGroup *m_alignGroup = nullptr;
 
     QString m_filePath;
+    QColor m_lastTextColor;
+    QColor m_lastHighlightColor;
     QString m_baseFontFamily;
     qreal m_baseFontSize = 12.0;
     int m_zoom = 100;

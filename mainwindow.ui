@@ -55,6 +55,9 @@
     <addaction name="actionIncreaseFontSize"/>
     <addaction name="actionDecreaseFontSize"/>
     <addaction name="separator"/>
+    <addaction name="actionTextColor"/>
+    <addaction name="actionHighlightColor"/>
+    <addaction name="separator"/>
     <addaction name="actionAlignLeft"/>
     <addaction name="actionAlignCenter"/>
     <addaction name="actionAlignRight"/>
@@ -180,6 +183,12 @@
    <property name="text"><string>&amp;Justify</string></property>
    <property name="shortcut"><string>Ctrl+J</string></property>
    <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionTextColor">
+   <property name="text"><string>Text &amp;Color...</string></property>
+  </action>
+  <action name="actionHighlightColor">
+   <property name="text"><string>&amp;Highlight Color...</string></property>
   </action>
   <action name="actionZoomIn">
    <property name="text"><string>Zoom &amp;In</string></property>
