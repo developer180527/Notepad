@@ -17,14 +17,18 @@
 #include <QDataStream>
 #include <QDateTime>
 #include <QColor>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QFileDialog>
+#include <QFormLayout>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontComboBox>
 #include <QGraphicsScene>
 #include <QImage>
 #include <QIntValidator>
+#include <QKeySequence>
 #include <QLabel>
 #include <QList>
 #include <QMenuBar>
@@ -42,6 +46,7 @@
 #include <QScrollBar>
 #include <QSet>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QTextBlock>
 #include <QTextCharFormat>
@@ -338,6 +343,7 @@ void MainWindow::connectActions()
 
     // Insert
     connect(ui->actionInsertImage, &QAction::triggered, this, &MainWindow::insertImage);
+    connect(ui->actionInsertTable, &QAction::triggered, this, &MainWindow::insertTable);
 
     // Format
     connect(ui->actionBold, &QAction::toggled, this, [this](bool on) {
@@ -355,6 +361,13 @@ void MainWindow::connectActions()
         fmt.setFontUnderline(on);
         mergeFormatOnSelection(fmt);
     });
+    // Ctrl/Cmd +/- change the font size (= and + both work for increase).
+    ui->actionIncreaseFontSize->setShortcuts(
+        {QKeySequence(QStringLiteral("Ctrl+=")), QKeySequence(QStringLiteral("Ctrl++"))});
+    ui->actionDecreaseFontSize->setShortcut(QKeySequence(QStringLiteral("Ctrl+-")));
+    connect(ui->actionIncreaseFontSize, &QAction::triggered, this, [this] { changeFontSize(+1); });
+    connect(ui->actionDecreaseFontSize, &QAction::triggered, this, [this] { changeFontSize(-1); });
+
     connect(ui->actionAlignLeft, &QAction::triggered, this,
             [this] { m_editor->setAlignmentValue(Qt::AlignLeft); });
     connect(ui->actionAlignCenter, &QAction::triggered, this,
@@ -855,6 +868,16 @@ void MainWindow::onFontSizeChanged(const QString &text)
     mergeFormatOnSelection(fmt);
 }
 
+void MainWindow::changeFontSize(int delta)
+{
+    qreal cur = m_editor->currentCharFormat().fontPointSize();
+    if (cur <= 0)
+        cur = m_baseFontSize;
+    QTextCharFormat fmt;
+    fmt.setFontPointSize(qBound(1.0, qRound(cur) + qreal(delta), 999.0));
+    mergeFormatOnSelection(fmt);
+}
+
 void MainWindow::applyBaseFont()
 {
     // Font family/size set the document's base font (whole document). Zoom is a
@@ -879,6 +902,32 @@ void MainWindow::insertImage()
     }
     m_editor->insertImage(img);
     m_editor->setFocus();
+}
+
+void MainWindow::insertTable()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Insert Table"));
+    auto *rows = new QSpinBox(&dialog);
+    rows->setRange(1, 100);
+    rows->setValue(2);
+    auto *cols = new QSpinBox(&dialog);
+    cols->setRange(1, 30);
+    cols->setValue(2);
+    auto *form = new QFormLayout;
+    form->addRow(tr("Rows:"), rows);
+    form->addRow(tr("Columns:"), cols);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        m_editor->insertTable(rows->value(), cols->value());
+        m_editor->setFocus();
+    }
 }
 
 void MainWindow::syncFormatControls()

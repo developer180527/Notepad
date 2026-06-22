@@ -44,12 +44,16 @@
    <widget class="QMenu" name="menuInsert">
     <property name="title"><string>&amp;Insert</string></property>
     <addaction name="actionInsertImage"/>
+    <addaction name="actionInsertTable"/>
    </widget>
    <widget class="QMenu" name="menuFormat">
     <property name="title"><string>F&amp;ormat</string></property>
     <addaction name="actionBold"/>
     <addaction name="actionItalic"/>
     <addaction name="actionUnderline"/>
+    <addaction name="separator"/>
+    <addaction name="actionIncreaseFontSize"/>
+    <addaction name="actionDecreaseFontSize"/>
     <addaction name="separator"/>
     <addaction name="actionAlignLeft"/>
     <addaction name="actionAlignCenter"/>
@@ -139,6 +143,9 @@
   <action name="actionInsertImage">
    <property name="text"><string>&amp;Image...</string></property>
   </action>
+  <action name="actionInsertTable">
+   <property name="text"><string>&amp;Table...</string></property>
+  </action>
   <action name="actionBold">
    <property name="text"><string>&amp;Bold</string></property>
    <property name="shortcut"><string>Ctrl+B</string></property>
@@ -176,11 +183,15 @@
   </action>
   <action name="actionZoomIn">
    <property name="text"><string>Zoom &amp;In</string></property>
-   <property name="shortcut"><string>Ctrl++</string></property>
   </action>
   <action name="actionZoomOut">
    <property name="text"><string>Zoom &amp;Out</string></property>
-   <property name="shortcut"><string>Ctrl+-</string></property>
+  </action>
+  <action name="actionIncreaseFontSize">
+   <property name="text"><string>&amp;Increase Font Size</string></property>
+  </action>
+  <action name="actionDecreaseFontSize">
+   <property name="text"><string>&amp;Decrease Font Size</string></property>
   </action>
   <action name="actionResetZoom">
    <property name="text"><string>&amp;Reset Zoom</string></property>

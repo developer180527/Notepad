@@ -69,9 +69,11 @@ private:
 
     // --- format ---
     void mergeFormatOnSelection(const QTextCharFormat &format);
+    void changeFontSize(int delta);
     void onFontFamilyChanged(const QFont &font);
     void onFontSizeChanged(const QString &text);
     void insertImage();
+    void insertTable();
     void syncFormatControls();
     void applyBaseFont();
 

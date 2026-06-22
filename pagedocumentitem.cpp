@@ -23,6 +23,7 @@
 #include <QTextFrame>
 #include <QTextImageFormat>
 #include <QTextLayout>
+#include <QTextTable>
 #include <QUrl>
 #include <QTimer>
 #include <QUrl>
@@ -585,14 +586,14 @@ void PageDocumentItem::selectAll()
 
 void PageDocumentItem::mergeFormatOnSelection(const QTextCharFormat &format)
 {
-    // Character formatting applies to the selection only. With no selection,
-    // do nothing and re-sync the toolbar so the toggled control snaps back.
-    if (!m_cursor.hasSelection()) {
-        notifyCursorUi();
-        return;
+    if (m_cursor.hasSelection()) {
+        m_cursor.mergeCharFormat(format);
+        m_typingFormat = m_cursor.charFormat();
+    } else {
+        // No selection: set the pending "typing format" so the next characters
+        // use it — lets you choose formatting before typing in a fresh doc.
+        m_typingFormat.merge(format);
     }
-    m_cursor.mergeCharFormat(format);
-    m_typingFormat = m_cursor.charFormat();
     notifyCursorUi();
     update();
 }
@@ -646,6 +647,28 @@ void PageDocumentItem::insertImage(const QImage &image)
     fmt.setWidth(w);
     fmt.setHeight(h);
     m_cursor.insertImage(fmt);
+    afterCursorMoved();
+}
+
+void PageDocumentItem::insertTable(int rows, int columns)
+{
+    if (rows < 1 || columns < 1)
+        return;
+    QTextTableFormat fmt;
+    fmt.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+    fmt.setBorder(1);
+    fmt.setBorderBrush(QColor(150, 150, 150));
+    fmt.setBorderCollapse(true);      // single-line grid (no doubled borders)
+    fmt.setCellPadding(4);
+    fmt.setCellSpacing(0);
+    fmt.setWidth(QTextLength(QTextLength::PercentageLength, 100));   // fill the text width
+    QList<QTextLength> widths;
+    widths.reserve(columns);
+    for (int i = 0; i < columns; ++i)
+        widths << QTextLength(QTextLength::PercentageLength, 100.0 / columns);
+    fmt.setColumnWidthConstraints(widths);
+
+    m_cursor.insertTable(rows, columns, fmt);
     afterCursorMoved();
 }
 
@@ -826,6 +849,30 @@ void PageDocumentItem::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Return:
     case Qt::Key_Enter:
         m_cursor.insertBlock();
+        afterCursorMoved(); event->accept(); return;
+    case Qt::Key_Tab:
+    case Qt::Key_Backtab:
+        if (QTextTable *table = m_cursor.currentTable()) {
+            const QTextTableCell cell = table->cellAt(m_cursor);
+            int row = cell.row();
+            int col = cell.column();
+            if (event->key() == Qt::Key_Backtab || shift) {
+                if (--col < 0) { col = table->columns() - 1; --row; }
+            } else {
+                if (++col >= table->columns()) {
+                    col = 0;
+                    if (++row >= table->rows())
+                        table->appendRows(1);   // Tab past the last cell adds a row
+                }
+            }
+            if (row >= 0) {
+                m_cursor = table->cellAt(row, col).firstCursorPosition();
+                afterCursorMoved();
+            }
+            event->accept();
+            return;
+        }
+        m_cursor.insertText(QStringLiteral("\t"), m_typingFormat);
         afterCursorMoved(); event->accept(); return;
     default:
         break;
@@ -1049,6 +1096,34 @@ void PageDocumentItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
 {
     const int imgPos = imageAt(event->pos());
     if (imgPos < 0) {
+        // Right-click inside a table → row/column operations.
+        QTextCursor probe(m_doc);
+        probe.setPosition(documentPositionAt(event->pos()));
+        if (QTextTable *table = probe.currentTable()) {
+            setFocus();
+            m_cursor = probe;
+            const QTextTableCell cell = table->cellAt(m_cursor);
+            const int row = cell.row();
+            const int col = cell.column();
+            QMenu menu;
+            QAction *ir = menu.addAction(tr("Insert Row Below"));
+            QAction *ic = menu.addAction(tr("Insert Column to the Right"));
+            menu.addSeparator();
+            QAction *dr = menu.addAction(tr("Delete Row"));
+            QAction *dc = menu.addAction(tr("Delete Column"));
+            QAction *chosen = menu.exec(event->screenPos());
+            if (chosen == ir)        table->insertRows(row + 1, 1);
+            else if (chosen == ic)   table->insertColumns(col + 1, 1);
+            else if (chosen == dr)   table->removeRows(row, 1);
+            else if (chosen == dc)   table->removeColumns(col, 1);
+            if (chosen) {
+                recomputePages();
+                emit contentsChanged();
+                update();
+            }
+            event->accept();
+            return;
+        }
         event->ignore();
         return;
     }

@@ -5,6 +5,8 @@
 #include <QFileOpenEvent>
 #include <QIcon>
 #include <QLocale>
+
+#include <cstdlib>
 #include <QPointer>
 #include <QString>
 #include <QTranslator>
@@ -78,5 +80,16 @@ int main(int argc, char *argv[])
         w.openPath(args.at(1));
 
     w.show();
-    return QApplication::exec();
+
+    const int status = QApplication::exec();
+
+#ifdef Q_OS_MACOS
+    // Work around a crash in Qt's cocoa plugin while releasing cached native
+    // touch/gesture events during QApplication teardown (segfaults on quit
+    // after trackpad use). All persistent state (settings, window geometry) is
+    // flushed before exec() returns, so exit now and skip the buggy teardown.
+    std::fflush(nullptr);
+    std::_Exit(status);
+#endif
+    return status;
 }

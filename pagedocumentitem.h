@@ -53,6 +53,7 @@ public:
     QTextCharFormat currentCharFormat() const { return m_typingFormat; }
     void setBaseFont(const QFont &font);
     void insertImage(const QImage &image);
+    void insertTable(int rows, int columns);
     void documentReset();          // call after loading new content into document()
 
     // Render page 1 (white sheet + first-page text) to an image, for the .note
