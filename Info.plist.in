@@ -12,6 +12,8 @@
     <string>Notepad</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>notepad_icon.icns</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
@@ -33,6 +35,22 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>org.notepad.note</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Text Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <!-- Alternate: we handle these system types but don't own them, so we
+                 appear in "Open With"; the user can set Notepad as the default. -->
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.html</string>
+                <string>net.daringfireball.markdown</string>
             </array>
         </dict>
     </array>

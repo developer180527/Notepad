@@ -42,6 +42,20 @@ void registerWindowsIntegration()
     classes.setValue(QStringLiteral("Notepad.Note/ShellEx/") + kThumbIface + QStringLiteral("/."),
                      kClsid);
 
+    // Register as an *opener* (not the forced default — Windows protects the
+    // default via UserChoice) for text-ish files: a ProgId + open command, then
+    // add it to each extension's "Open with" list. The user can then pick
+    // Notepad via "Open with > Choose another app > Always".
+    classes.setValue(QStringLiteral("Notepad.Text/."), QStringLiteral("Text Document"));
+    classes.setValue(QStringLiteral("Notepad.Text/DefaultIcon/."), exe + QStringLiteral(",0"));
+    classes.setValue(QStringLiteral("Notepad.Text/shell/open/command/."),
+                     QStringLiteral("\"") + exe + QStringLiteral("\" \"%1\""));
+    const QStringList textExts = {QStringLiteral(".txt"), QStringLiteral(".md"),
+                                  QStringLiteral(".markdown"), QStringLiteral(".html"),
+                                  QStringLiteral(".htm")};
+    for (const QString &ext : textExts)
+        classes.setValue(ext + QStringLiteral("/OpenWithProgids/Notepad.Text"), QString());
+
     classes.sync();
 }
 #else

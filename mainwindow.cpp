@@ -33,6 +33,9 @@
 #include <QPair>
 #include <QPalette>
 #include <QPdfWriter>
+#include <QPrintDialog>
+#include <QPrinter>
+#include <QSettings>
 #include <QPixmap>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -102,6 +105,12 @@ MainWindow::MainWindow(QWidget *parent)
     setZoom(100);
     updateWordCount();
     updatePageLabel();
+
+    // Restore the last window size/position.
+    const QByteArray geom = QSettings().value(QStringLiteral("ui/geometry")).toByteArray();
+    if (!geom.isEmpty())
+        restoreGeometry(geom);
+
     m_editor->setFocus();
     statusBar()->showMessage(tr("Ready"), 2000);
 }
@@ -270,6 +279,7 @@ void MainWindow::connectActions()
     connect(ui->actionSave, &QAction::triggered, this, &MainWindow::saveFile);
     connect(ui->actionSaveAs, &QAction::triggered, this, &MainWindow::saveFileAs);
     connect(ui->actionExportPdf, &QAction::triggered, this, &MainWindow::exportPdf);
+    connect(ui->actionPrint, &QAction::triggered, this, &MainWindow::printDocument);
     connect(ui->actionQuit, &QAction::triggered, this, &QWidget::close);
 
     // Edit
@@ -459,13 +469,16 @@ void MainWindow::openFile()
 {
     if (!maybeSave())
         return;
+    QSettings settings;
+    const QString lastDir = settings.value(QStringLiteral("io/lastDir")).toString();
     const QString fn = QFileDialog::getOpenFileName(
-        this, tr("Open"), QString(),
+        this, tr("Open"), lastDir,
         tr("All Supported (*.note *.txt *.md *.markdown *.html *.htm);;"
            "Notepad Note (*.note);;Text (*.txt);;Markdown (*.md *.markdown);;"
            "HTML (*.html *.htm);;All Files (*)"));
     if (fn.isEmpty())
         return;
+    settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(fn).absolutePath());
     if (loadFromFile(fn))
         setCurrentFile(fn);
 }
@@ -487,8 +500,15 @@ bool MainWindow::saveFile()
 
 bool MainWindow::saveFileAs()
 {
-    QString selectedFilter;
-    QString suggested = m_filePath.isEmpty() ? QStringLiteral("Untitled.note") : m_filePath;
+    QSettings settings;
+    // Restore the last-used directory and format/filter from the previous save.
+    QString selectedFilter = settings.value(QStringLiteral("io/lastSaveFilter")).toString();
+    QString suggested = m_filePath;
+    if (suggested.isEmpty()) {
+        const QString lastDir = settings.value(QStringLiteral("io/lastDir")).toString();
+        suggested = (lastDir.isEmpty() ? QString() : lastDir + QLatin1Char('/'))
+                    + QStringLiteral("Untitled.note");
+    }
     QString fn = QFileDialog::getSaveFileName(
         this, tr("Save As"), suggested,
         tr("Notepad Note (*.note);;Text (*.txt);;Markdown (*.md);;HTML (*.html)"),
@@ -507,6 +527,9 @@ bool MainWindow::saveFileAs()
         else
             fn += QStringLiteral(".note");
     }
+
+    settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(fn).absolutePath());
+    settings.setValue(QStringLiteral("io/lastSaveFilter"), selectedFilter);
 
     if (writeToFile(fn)) {
         setCurrentFile(fn);
@@ -776,6 +799,26 @@ void MainWindow::exportPdf()
     statusBar()->showMessage(tr("Exported %1").arg(QFileInfo(fn).fileName()), 2500);
 }
 
+void MainWindow::printDocument()
+{
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setPageSize(QPageSize(QPageSize::A4));
+    QPrintDialog dialog(&printer, this);
+    dialog.setWindowTitle(tr("Print"));
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    // Print from a clone at the base (un-zoomed) font, like PDF export.
+    QTextDocument *doc = m_editor->document()->clone(this);
+    QFont f(m_baseFontFamily);
+    f.setPointSizeF(m_baseFontSize);
+    doc->setDefaultFont(f);
+    doc->print(&printer);
+    delete doc;
+
+    statusBar()->showMessage(tr("Sent to printer"), 2500);
+}
+
 // ---------------------------------------------------------------- format
 
 void MainWindow::mergeFormatOnSelection(const QTextCharFormat &format)
@@ -952,10 +995,12 @@ void MainWindow::updatePageLabel()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (maybeSave())
+    if (maybeSave()) {
+        QSettings().setValue(QStringLiteral("ui/geometry"), saveGeometry());
         event->accept();
-    else
+    } else {
         event->ignore();
+    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)

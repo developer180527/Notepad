@@ -99,7 +99,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev \
-                                  imagemagick file fuse
+                                  file fuse
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -114,12 +114,9 @@ jobs:
 
       - name: Stage AppDir
         run: |
+          # The install step lays down the real app icon at
+          # AppDir/usr/share/icons/hicolor/256x256/apps/notepad.png
           DESTDIR="$PWD/AppDir" cmake --install build
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          # Placeholder icon drawn from shape primitives (no font dependency).
-          convert -size 256x256 xc:'#2d5fa0' -fill white \
-                  -draw "roundrectangle 70,40 186,216 10,10" \
-                  AppDir/usr/share/icons/hicolor/256x256/apps/notepad.png
 
       - name: Build AppImage
         env:

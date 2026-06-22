@@ -73,3 +73,26 @@ clear the thumbnail cache. An installer (WiX/NSIS) should drop `Notepad.exe` +
 > tested on the authoring machine (macOS). They follow Microsoft's standard
 > `IThumbnailProvider`/`IInitializeWithStream` pattern; build with MSVC + the
 > Windows SDK and verify in Explorer.
+
+---
+
+## Making Notepad the default for `.txt` (and `.md`, `.html`)
+
+Notepad now **registers as a handler** for these text types on all three
+platforms, so it appears in "Open With". Becoming the *default* can't be forced
+programmatically (Windows protects it via a UserChoice hash; macOS requires a
+user action) — set it per OS:
+
+- **macOS**: declared in `Info.plist.in` as an `Alternate` handler for
+  `public.plain-text`, `public.html`, `net.daringfireball.markdown`. To default:
+  Finder → select a `.txt` → ⌘I → "Open with" → Notepad → "Change All…".
+- **Windows**: `winregister.cpp` adds `Notepad.Text` to each extension's
+  `OpenWithProgids`. To default: right-click a `.txt` → "Open with" → "Choose
+  another app" → Notepad → "Always".
+- **Linux**: the `.desktop` lists `text/plain;text/markdown;text/html`. To
+  default (per-user, scriptable in an installer):
+  ```sh
+  xdg-mime default notepad.desktop text/plain
+  xdg-mime default notepad.desktop text/markdown
+  xdg-mime default notepad.desktop text/html
+  ```

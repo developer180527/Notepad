@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(Notepad LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport LinguistTools)
 
 qt_standard_project_setup()
 
@@ -39,6 +39,13 @@ qt_add_resources(Notepad "appfonts"
         fonts/JetBrainsMono.ttf
 )
 
+# Runtime window/taskbar icon, available on every platform as :/icons/notepad.png
+qt_add_resources(Notepad "appicon"
+    PREFIX "/icons"
+    BASE "assets"
+    FILES assets/notepad.png
+)
+
 qt_add_translations(
     TARGETS Notepad
     TS_FILES Notepad_en_IN.ts
@@ -49,6 +56,7 @@ target_link_libraries(Notepad
         Qt::Core
         Qt::Widgets
         Qt::Svg
+        Qt::PrintSupport
 )
 
 # macOS: register the .note document type, and add Quick Look + thumbnail
@@ -59,6 +67,11 @@ if(APPLE)
     set_target_properties(Notepad PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in
     )
+
+    # Bundle the .icns into Contents/Resources (referenced by CFBundleIconFile).
+    set(macos_icon ${CMAKE_CURRENT_SOURCE_DIR}/assets/notepad_icon.icns)
+    target_sources(Notepad PRIVATE ${macos_icon})
+    set_source_files_properties(${macos_icon} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
     set(NOTEPAD_SIGN_IDENTITY "Apple Development"
         CACHE STRING "codesign identity for Notepad and its extensions")
@@ -144,12 +157,17 @@ if(UNIX AND NOT APPLE)
     install(FILES linux/notepad.desktop DESTINATION share/applications)
     install(FILES linux/notepad-note.xml DESTINATION share/mime/packages)
     install(FILES linux/notepad.thumbnailer DESTINATION share/thumbnailers)
+    install(FILES assets/notepad.png
+            DESTINATION share/icons/hicolor/256x256/apps RENAME notepad.png)
 endif()
 
 # Windows: an IThumbnailProvider COM DLL. The app self-registers the .note
 # association + this DLL's CLSID on launch (winregister.cpp), so it must sit
 # next to Notepad.exe.
 if(WIN32)
+    # Embed the application icon into Notepad.exe (Explorer + taskbar).
+    target_sources(Notepad PRIVATE windows/notepad.rc)
+
     add_library(NoteThumbnail SHARED
         windows/NoteThumbnailProvider.cpp
         windows/NoteThumbnailProvider.def)

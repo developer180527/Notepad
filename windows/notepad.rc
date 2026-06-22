@@ -1,0 +1,3 @@
+// Embeds the application icon into Notepad.exe. The first ICON entry becomes
+// the executable's icon shown in Explorer and the taskbar.
+IDI_ICON1 ICON "notepad.ico"

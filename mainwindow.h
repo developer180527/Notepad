@@ -59,6 +59,7 @@ private:
     bool saveFile();
     bool saveFileAs();
     void exportPdf();
+    void printDocument();
     bool maybeSave();
     bool writeToFile(const QString &path);
     bool loadFromFile(const QString &path);

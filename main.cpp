@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QFileOpenEvent>
+#include <QIcon>
 #include <QLocale>
 #include <QPointer>
 #include <QString>
@@ -47,6 +48,11 @@ private:
 int main(int argc, char *argv[])
 {
     NotepadApplication a(argc, argv);
+    // Identify the app so QSettings persists in a stable, per-app location.
+    QApplication::setOrganizationName(QStringLiteral("Notepad"));
+    QApplication::setOrganizationDomain(QStringLiteral("org.notepad"));
+    QApplication::setApplicationName(QStringLiteral("Notepad"));
+    a.setWindowIcon(QIcon(QStringLiteral(":/icons/notepad.png")));
 
     // On Windows, ensure the .note association + thumbnail handler are registered
     // (per-user). No-op elsewhere.

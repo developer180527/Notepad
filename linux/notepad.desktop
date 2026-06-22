@@ -6,4 +6,4 @@ Exec=Notepad %f
 Icon=notepad
 Terminal=false
 Categories=Utility;TextEditor;
-MimeType=application/x-notepad-note;text/plain;text/markdown;
+MimeType=application/x-notepad-note;text/plain;text/markdown;text/html;
