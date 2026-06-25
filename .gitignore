@@ -86,6 +86,6 @@ CMakeLists.txt.user*
 /.qtcreator/
 
 # Doxygen documentation
-docs/html
-docs/xml
-docs/latex/
+docs/Doxygen/html
+docs/Doxygen/xml
+docs/Doxygen/latex/
