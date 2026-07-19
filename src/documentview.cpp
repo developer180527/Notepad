@@ -81,6 +81,11 @@ DocumentView::DocumentView(QWidget *parent)
     applyBaseFont();
     applyPageSetup();
     updateSceneRect();
+
+    // Setting the default font and page metrics counts as touching the document,
+    // so a brand-new view would otherwise report itself as modified — which
+    // would prompt to save an untouched tab and stop "open" from reusing it.
+    m_editor->document()->setModified(false);
 }
 
 QTextDocument *DocumentView::document() const

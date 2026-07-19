@@ -3,6 +3,7 @@
 
 #include "canvasview.h"
 #include "documentview.h"
+#include "documenttabbar.h"
 #include "codehighlighter.h"
 #include "findbar.h"
 #include "fontcombo.h"
@@ -56,6 +57,8 @@
 #include <QSet>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStackedWidget>
+#include <QTabBar>
 #include <QStatusBar>
 #include <QTextBlock>
 #include <QTextCharFormat>
@@ -103,7 +106,7 @@ MainWindow::MainWindow(QWidget *parent)
     // gap between them.
     ui->menubar->setFixedHeight(kBarHeight);
 
-    setupDocument();
+    setupWorkspace();
     applyCanvasTheme();
     setupToolBar();
     setupStatusBar();
@@ -111,9 +114,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupShortcutFeedback();
     refreshIcons();
 
-    setCurrentFile(QString());
+    addDocument();                 // start with one empty document
     setZoom(100);
-    syncChromeToDocument();
 
     // Restore the last window size/position.
     const QByteArray geom = QSettings().value(QStringLiteral("ui/geometry")).toByteArray();
@@ -129,27 +131,119 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-void MainWindow::setupDocument()
+void MainWindow::setupWorkspace()
 {
-    m_doc = new DocumentView(this);
     m_findBar = new FindBar(this);
     m_findBar->hide();
+
+    m_stack = new QStackedWidget(this);
+    m_tabs = new DocumentTabBar(this);
 
     auto *central = new QWidget(this);
     auto *centralLayout = new QVBoxLayout(central);
     centralLayout->setContentsMargins(0, 0, 0, 0);
     centralLayout->setSpacing(0);
     centralLayout->addWidget(m_findBar);
-    centralLayout->addWidget(m_doc, 1);
+    centralLayout->addWidget(m_stack, 1);
+    centralLayout->addWidget(m_tabs);      // tab strip sits just above the status bar
     setCentralWidget(central);
 
-    // The window chrome is a *view* of the document: it follows the document's
-    // signals rather than tracking its own copies of the state.
-    connect(m_doc, &DocumentView::modifiedChanged, this, &QWidget::setWindowModified);
-    connect(m_doc, &DocumentView::statusMessage, this,
-            [this](const QString &text, int ms) { statusBar()->showMessage(text, ms); });
-    connect(m_doc, &DocumentView::openFileRequested, this, &MainWindow::openPath);
-    connect(m_doc, &DocumentView::zoomChanged, this, [this](int percent) {
+    connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
+        if (index >= 0 && index < m_stack->count())
+            m_stack->setCurrentIndex(index);
+        bindDocument();
+    });
+    connect(m_tabs, &QTabBar::tabCloseRequested, this,
+            [this](int index) { closeDocumentAt(index); });
+    connect(m_tabs, &DocumentTabBar::newTabRequested, this, &MainWindow::newFile);
+    // Dragging a tab reorders the bar only; the stack has to follow so indices
+    // keep lining up.
+    connect(m_tabs, &QTabBar::tabMoved, this, [this](int from, int to) {
+        QWidget *w = m_stack->widget(from);
+        if (!w)
+            return;
+        m_stack->removeWidget(w);
+        m_stack->insertWidget(to, w);
+        m_stack->setCurrentIndex(m_tabs->currentIndex());
+    });
+}
+
+DocumentView *MainWindow::documentAt(int index) const
+{
+    return qobject_cast<DocumentView *>(m_stack->widget(index));
+}
+
+int MainWindow::indexOfDocument(DocumentView *doc) const
+{
+    return doc ? m_stack->indexOf(doc) : -1;
+}
+
+int MainWindow::indexOfFile(const QString &path) const
+{
+    if (path.isEmpty())
+        return -1;
+    const QString target = QFileInfo(path).absoluteFilePath();
+    for (int i = 0; i < m_stack->count(); ++i) {
+        DocumentView *d = documentAt(i);
+        if (d && !d->filePath().isEmpty()
+            && QFileInfo(d->filePath()).absoluteFilePath() == target)
+            return i;
+    }
+    return -1;
+}
+
+DocumentView *MainWindow::addDocument()
+{
+    auto *doc = new DocumentView(m_stack);
+    const int index = m_stack->addWidget(doc);
+    m_tabs->insertTab(index, doc->displayName());
+    m_tabs->setDocumentLabel(index, doc->displayName(), false);
+
+    // Window-level bookkeeping that must run for *every* document, current or
+    // not: a background tab still needs its label to show unsaved changes.
+    connect(doc, &DocumentView::modifiedChanged, this, [this, doc](bool) { updateTabLabel(doc); });
+    connect(doc, &DocumentView::filePathChanged, this, [this, doc](const QString &) {
+        updateTabLabel(doc);
+        if (doc == m_doc)
+            setWindowTitle(tr("%1[*] %2 Notepad").arg(doc->displayName(), QString(QChar(0x2014))));
+    });
+    connect(doc, &DocumentView::openFileRequested, this, &MainWindow::openPath);
+
+    doc->setRulerVisible(ui->actionShowRuler->isChecked());
+    applyCanvasTheme();
+
+    m_tabs->setCurrentIndex(index);
+    m_stack->setCurrentIndex(index);
+    bindDocument();
+    return doc;
+}
+
+void MainWindow::updateTabLabel(DocumentView *doc)
+{
+    const int index = indexOfDocument(doc);
+    if (index >= 0)
+        m_tabs->setDocumentLabel(index, doc->displayName(), doc->isModified());
+    if (doc == m_doc)
+        setWindowModified(doc->isModified());
+}
+
+// Point the window chrome at whichever document is now current. Connections
+// that feed the toolbar/status bar are per-document, so they are torn down and
+// rebuilt here rather than leaking across tab switches.
+void MainWindow::bindDocument()
+{
+    for (const QMetaObject::Connection &c : std::as_const(m_docConnections))
+        disconnect(c);
+    m_docConnections.clear();
+
+    m_doc = qobject_cast<DocumentView *>(m_stack->currentWidget());
+    if (!m_doc)
+        return;
+
+    PageDocumentItem *ed = m_doc->editor();
+    m_docConnections << connect(m_doc, &DocumentView::statusMessage, this,
+                                [this](const QString &t, int ms) { statusBar()->showMessage(t, ms); });
+    m_docConnections << connect(m_doc, &DocumentView::zoomChanged, this, [this](int percent) {
         if (m_updatingControls)
             return;
         m_updatingControls = true;
@@ -158,13 +252,86 @@ void MainWindow::setupDocument()
         m_zoomLabel->setText(QString::number(percent) + QStringLiteral("%"));
         m_updatingControls = false;
     });
+    m_docConnections << connect(ed, &PageDocumentItem::undoAvailable,
+                                ui->actionUndo, &QAction::setEnabled);
+    m_docConnections << connect(ed, &PageDocumentItem::redoAvailable,
+                                ui->actionRedo, &QAction::setEnabled);
+    m_docConnections << connect(ed, &PageDocumentItem::selectionAvailable,
+                                ui->actionCut, &QAction::setEnabled);
+    m_docConnections << connect(ed, &PageDocumentItem::selectionAvailable,
+                                ui->actionCopy, &QAction::setEnabled);
+    m_docConnections << connect(ed, &PageDocumentItem::contentsChanged,
+                                this, &MainWindow::updateWordCount);
+    m_docConnections << connect(ed, &PageDocumentItem::pageCountChanged, this,
+                                [this](int) { updatePageLabel(); });
+    m_docConnections << connect(ed, &PageDocumentItem::cursorPositionChanged, this, [this] {
+        syncFormatControls();
+        updatePageLabel();
+    });
+
+    ui->actionUndo->setEnabled(m_doc->document()->isUndoAvailable());
+    ui->actionRedo->setEnabled(m_doc->document()->isRedoAvailable());
+
+    // The find bar belongs to the window; its highlights belong to a document.
+    if (m_findBar->isVisible())
+        m_findBar->dismiss();
+
+    setWindowTitle(tr("%1[*] %2 Notepad").arg(m_doc->displayName(), QString(QChar(0x2014))));
+    setWindowFilePath(m_doc->filePath());
+    syncChromeToDocument();
+    m_doc->editor()->setFocus();
 }
+
+bool MainWindow::maybeSaveDocument(DocumentView *doc)
+{
+    if (!doc || !doc->isModified())
+        return true;
+    // Show the user which document is being asked about — with several tabs open
+    // an unqualified "the document" is ambiguous.
+    const auto ret = QMessageBox::warning(
+        this, tr("Notepad"),
+        tr("\"%1\" has been modified.\nDo you want to save your changes?")
+            .arg(doc->displayName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    if (ret == QMessageBox::Cancel)
+        return false;
+    if (ret == QMessageBox::Discard)
+        return true;
+
+    DocumentView *previous = m_doc;
+    m_doc = doc;                   // save* act on m_doc
+    const bool saved = saveFile();
+    m_doc = previous;
+    return saved;
+}
+
+bool MainWindow::closeDocumentAt(int index)
+{
+    DocumentView *doc = documentAt(index);
+    if (!doc)
+        return true;
+    if (!maybeSaveDocument(doc))
+        return false;
+
+    m_stack->removeWidget(doc);
+    m_tabs->removeTab(index);
+    doc->deleteLater();
+
+    if (m_stack->count() == 0)
+        addDocument();             // never leave the window without a document
+    else
+        bindDocument();
+    return true;
+}
+
 
 // Pull every piece of window chrome back into line with the current document.
 // Phase 2 calls this on tab switch; today it just runs at startup and after a
 // document is loaded.
 void MainWindow::syncChromeToDocument()
 {
+    if (!m_doc)
+        return;
     m_updatingControls = true;
     m_fontCombo->setCurrentFont(QFont(m_doc->baseFontFamily()));
     m_sizeCombo->setCurrentText(QString::number(qRound(m_doc->baseFontSize())));
@@ -308,19 +475,38 @@ void MainWindow::connectActions()
     connect(ui->actionExportPdf, &QAction::triggered, this, &MainWindow::exportPdf);
     connect(ui->actionPrint, &QAction::triggered, this, &MainWindow::printDocument);
     connect(ui->actionQuit, &QAction::triggered, this, &QWidget::close);
+    connect(ui->actionCloseTab, &QAction::triggered, this,
+            [this] { closeDocumentAt(m_tabs->currentIndex()); });
+
+    // Tab cycling. Not in a menu — these are muscle-memory shortcuts.
+    ui->actionNextTab->setShortcuts({QKeySequence(QStringLiteral("Ctrl+Tab")),
+                                     QKeySequence(QStringLiteral("Ctrl+PgDown"))});
+    ui->actionPrevTab->setShortcuts({QKeySequence(QStringLiteral("Ctrl+Shift+Tab")),
+                                     QKeySequence(QStringLiteral("Ctrl+PgUp"))});
+    addAction(ui->actionNextTab);
+    addAction(ui->actionPrevTab);
+    connect(ui->actionNextTab, &QAction::triggered, this, [this] {
+        if (m_tabs->count() > 1)
+            m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % m_tabs->count());
+    });
+    connect(ui->actionPrevTab, &QAction::triggered, this, [this] {
+        if (m_tabs->count() > 1)
+            m_tabs->setCurrentIndex((m_tabs->currentIndex() - 1 + m_tabs->count()) % m_tabs->count());
+    });
 
     // Edit
-    connect(ui->actionUndo, &QAction::triggered, m_doc->editor(), &PageDocumentItem::undo);
-    connect(ui->actionRedo, &QAction::triggered, m_doc->editor(), &PageDocumentItem::redo);
-    connect(ui->actionCut, &QAction::triggered, m_doc->editor(), &PageDocumentItem::cut);
-    connect(ui->actionCopy, &QAction::triggered, m_doc->editor(), &PageDocumentItem::copy);
-    connect(ui->actionPaste, &QAction::triggered, m_doc->editor(), &PageDocumentItem::paste);
-    connect(ui->actionSelectAll, &QAction::triggered, m_doc->editor(), &PageDocumentItem::selectAll);
+    // These dispatch through m_doc at call time: the target document changes
+    // with every tab switch, so they must not bind to one editor up front.
+    auto onEditor = [this](void (PageDocumentItem::*fn)()) {
+        return [this, fn] { if (m_doc) (m_doc->editor()->*fn)(); };
+    };
+    connect(ui->actionUndo, &QAction::triggered, this, onEditor(&PageDocumentItem::undo));
+    connect(ui->actionRedo, &QAction::triggered, this, onEditor(&PageDocumentItem::redo));
+    connect(ui->actionCut, &QAction::triggered, this, onEditor(&PageDocumentItem::cut));
+    connect(ui->actionCopy, &QAction::triggered, this, onEditor(&PageDocumentItem::copy));
+    connect(ui->actionPaste, &QAction::triggered, this, onEditor(&PageDocumentItem::paste));
+    connect(ui->actionSelectAll, &QAction::triggered, this, onEditor(&PageDocumentItem::selectAll));
 
-    connect(m_doc->editor(), &PageDocumentItem::undoAvailable, ui->actionUndo, &QAction::setEnabled);
-    connect(m_doc->editor(), &PageDocumentItem::redoAvailable, ui->actionRedo, &QAction::setEnabled);
-    connect(m_doc->editor(), &PageDocumentItem::selectionAvailable, ui->actionCut, &QAction::setEnabled);
-    connect(m_doc->editor(), &PageDocumentItem::selectionAvailable, ui->actionCopy, &QAction::setEnabled);
     ui->actionUndo->setEnabled(false);
     ui->actionRedo->setEnabled(false);
     ui->actionCut->setEnabled(false);
@@ -419,7 +605,8 @@ void MainWindow::connectActions()
     connect(ui->actionZoomOut, &QAction::triggered, this, [this] { setZoom(m_doc->zoom() - 10); });
     connect(ui->actionResetZoom, &QAction::triggered, this, [this] { setZoom(100); });
     connect(ui->actionShowRuler, &QAction::toggled, this, [this](bool on) {
-        m_doc->setRulerVisible(on);
+        for (int i = 0; i < m_stack->count(); ++i)
+            documentAt(i)->setRulerVisible(on);   // a view preference, not a document one
     });
     connect(ui->actionMarkdownSource, &QAction::toggled, this, [this](bool on) {
         if (m_updatingControls)
@@ -453,14 +640,6 @@ void MainWindow::connectActions()
     connect(ui->actionAboutQt, &QAction::triggered, qApp, &QApplication::aboutQt);
 
     // Editor state -> UI
-    connect(m_doc->editor(), &PageDocumentItem::contentsChanged, this, &MainWindow::updateWordCount);
-    connect(m_doc->editor(), &PageDocumentItem::pageCountChanged, this,
-            [this](int) { updatePageLabel(); });
-    connect(m_doc->editor(), &PageDocumentItem::cursorPositionChanged, this, [this] {
-        syncFormatControls();
-        updatePageLabel();
-    });
-    connect(m_doc->editor(), &PageDocumentItem::openFileRequested, this, &MainWindow::openPath);
 }
 
 // When an action runs from a keyboard shortcut there's no visual feedback at
@@ -538,20 +717,19 @@ void MainWindow::applyCanvasTheme()
     const QColor base = palette().color(QPalette::Window);
     const QColor canvasColor =
         base.lightness() < 128 ? base.darker(118) : QColor(0xD6, 0xD6, 0xD6);
-    if (m_doc->canvas())
-        m_doc->canvas()->setBackgroundBrush(canvasColor);
+    if (!m_stack)
+        return;                       // called once before any document exists
+    for (int i = 0; i < m_stack->count(); ++i)
+        if (DocumentView *d = documentAt(i))
+            d->canvas()->setBackgroundBrush(canvasColor);
 }
 
 // ---------------------------------------------------------------- file ops
 
+// New/Open no longer disturb what's already on screen — they add a tab.
 void MainWindow::newFile()
 {
-    if (!maybeSave())
-        return;
-    m_doc->document()->clear();
-    m_doc->editor()->documentReset();
-    setCurrentFile(QString());
-    updateWordCount();
+    addDocument();
 }
 
 void MainWindow::openFile()
@@ -568,16 +746,45 @@ void MainWindow::openFile()
     if (fn.isEmpty())
         return;
     settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(fn).absolutePath());
-    if (loadDocument(fn))
-        setCurrentFile(fn);
+    openPath(fn);
 }
 
 void MainWindow::openPath(const QString &path)
 {
-    if (path.isEmpty() || !maybeSave())
+    if (path.isEmpty())
         return;
-    if (loadDocument(path))
-        setCurrentFile(path);
+
+    // Already open here? Just bring that tab forward rather than loading a
+    // second copy that could diverge from the first.
+    const int existing = indexOfFile(path);
+    if (existing >= 0) {
+        m_tabs->setCurrentIndex(existing);
+        return;
+    }
+
+    // Reuse the current tab only if it's a pristine, untitled, empty document —
+    // otherwise the user's work would be replaced.
+    DocumentView *target = m_doc;
+    const bool reusable = target && target->filePath().isEmpty() && !target->isModified()
+                          && target->document()->isEmpty();
+    if (!reusable)
+        target = addDocument();
+
+    QString error;
+    if (!target->load(path, &error)) {
+        QMessageBox::warning(this, tr("Notepad"), error);
+        if (!reusable)
+            closeDocumentAt(indexOfDocument(target));
+        return;
+    }
+    target->setFilePath(path);
+    target->document()->setModified(false);
+    updateTabLabel(target);
+    if (target == m_doc)
+        syncChromeToDocument();
+    setWindowTitle(tr("%1[*] %2 Notepad").arg(target->displayName(), QString(QChar(0x2014))));
+    setWindowFilePath(path);
+    updateMarkdownActionState();
 }
 
 // A remembered directory is only useful if it still exists — folders get
@@ -733,17 +940,7 @@ void MainWindow::setCurrentFile(const QString &path)
 
 bool MainWindow::maybeSave()
 {
-    if (!m_doc->editor()->document()->isModified())
-        return true;
-    const auto ret = QMessageBox::warning(
-        this, tr("Notepad"),
-        tr("The document has been modified.\nDo you want to save your changes?"),
-        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-    if (ret == QMessageBox::Save)
-        return saveFile();
-    if (ret == QMessageBox::Cancel)
-        return false;
-    return true;
+    return maybeSaveDocument(m_doc);
 }
 
 void MainWindow::exportPdf()
@@ -986,12 +1183,19 @@ void MainWindow::updatePageLabel()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (maybeSave()) {
-        QSettings().setValue(QStringLiteral("ui/geometry"), saveGeometry());
-        event->accept();
-    } else {
-        event->ignore();
+    // Every tab gets its own prompt; cancelling any one aborts the whole close.
+    for (int i = 0; i < m_stack->count(); ++i) {
+        DocumentView *doc = documentAt(i);
+        if (doc && doc->isModified()) {
+            m_tabs->setCurrentIndex(i);      // show what's being asked about
+            if (!maybeSaveDocument(doc)) {
+                event->ignore();
+                return;
+            }
+        }
     }
+    QSettings().setValue(QStringLiteral("ui/geometry"), saveGeometry());
+    event->accept();
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)

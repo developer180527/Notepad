@@ -7,15 +7,18 @@
 #include <QPageLayout>
 #include <QPageSize>
 #include <QString>
+#include <QList>
 
 class PageDocumentItem;
 class DocumentView;
+class DocumentTabBar;
 class CodeHighlighter;
 class FontCombo;
 class CanvasView;
 class FindBar;
 class RulerWidget;
 class QGraphicsScene;
+class QStackedWidget;
 class QComboBox;
 class QSlider;
 class QLabel;
@@ -51,8 +54,18 @@ private:
     // --- setup ---
     void setupToolBar();
     void setupStatusBar();
-    void setupDocument();               // create + wire the DocumentView
+    void setupWorkspace();              // find bar + document stack + tab strip
     void syncChromeToDocument();        // toolbar/status/title follow the document
+
+    // --- documents / tabs ---
+    DocumentView *addDocument();                     // new empty tab, made current
+    DocumentView *documentAt(int index) const;
+    int indexOfDocument(DocumentView *doc) const;
+    int indexOfFile(const QString &path) const;      // -1 if not open in this window
+    void bindDocument();                             // re-point chrome at the current tab
+    bool closeDocumentAt(int index);                 // prompts to save; false = cancelled
+    void updateTabLabel(DocumentView *doc);
+    bool maybeSaveDocument(DocumentView *doc);       // save prompt for one document
     void connectActions();
     void setupShortcutFeedback();          // flash a menu when its shortcut fires
     void flashMenu(QAction *menuAction);
@@ -97,7 +110,10 @@ private:
 
     Ui::MainWindow *ui;
 
-    DocumentView *m_doc = nullptr;      // the open document (one for now)
+    DocumentView *m_doc = nullptr;      // the *current* document (owned by m_stack)
+    QStackedWidget *m_stack = nullptr;
+    DocumentTabBar *m_tabs = nullptr;
+    QList<QMetaObject::Connection> m_docConnections;   // rebound on every tab switch
     FindBar *m_findBar = nullptr;
 
     FontCombo *m_fontCombo = nullptr;
