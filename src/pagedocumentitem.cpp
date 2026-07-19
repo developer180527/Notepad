@@ -68,6 +68,12 @@ PageDocumentItem::PageDocumentItem(QGraphicsItem *parent)
     connect(m_doc, &QTextDocument::undoAvailable, this, &PageDocumentItem::undoAvailable);
     connect(m_doc, &QTextDocument::redoAvailable, this, &PageDocumentItem::redoAvailable);
 
+    // Document *property* changes (setDocumentMargin, setDefaultFont, …) push
+    // real entries onto the undo stack, so the setup above leaves a phantom step
+    // behind: a brand-new document would show Undo enabled, and the last Ctrl+Z
+    // after an edit would appear to do nothing. Start from a clean history.
+    m_doc->clearUndoRedoStacks();
+
     m_blink = new QTimer(this);
     m_blink->setInterval(530);
     connect(m_blink, &QTimer::timeout, this, [this] {
@@ -518,6 +524,10 @@ void PageDocumentItem::clearImageSelection()
 
 void PageDocumentItem::documentReset()
 {
+    // Loading a file (setPlainText/setHtml/setMarkdown) and the font/margin
+    // setup around it are undoable operations — but undoing *past* a file load
+    // is never what the user wants, so the freshly loaded state is the baseline.
+    m_doc->clearUndoRedoStacks();
     m_cursor = QTextCursor(m_doc);
     m_typingFormat = m_cursor.charFormat();
     recomputePages();
@@ -671,7 +681,9 @@ void PageDocumentItem::insertTable(int rows, int columns)
         widths << QTextLength(QTextLength::PercentageLength, 100.0 / columns);
     fmt.setColumnWidthConstraints(widths);
 
+    m_cursor.beginEditBlock();          // one undo step for the whole table
     m_cursor.insertTable(rows, columns, fmt);
+    m_cursor.endEditBlock();
     afterCursorMoved();
 }
 

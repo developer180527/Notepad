@@ -71,6 +71,8 @@
     <addaction name="separator"/>
     <addaction name="actionShowRuler"/>
     <addaction name="actionWordWrap"/>
+    <addaction name="separator"/>
+    <addaction name="actionMarkdownSource"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title"><string>&amp;Help</string></property>
@@ -215,6 +217,12 @@
    <property name="text"><string>&amp;Word Wrap</string></property>
    <property name="checkable"><bool>true</bool></property>
    <property name="checked"><bool>true</bool></property>
+  </action>
+  <action name="actionMarkdownSource">
+   <property name="text"><string>Markdown &amp;Source</string></property>
+   <property name="checkable"><bool>true</bool></property>
+   <property name="shortcut"><string>Ctrl+Shift+M</string></property>
+   <property name="toolTip"><string>Show the raw Markdown text instead of the formatted document</string></property>
   </action>
   <action name="actionAbout">
    <property name="text"><string>&amp;About Notepad</string></property>

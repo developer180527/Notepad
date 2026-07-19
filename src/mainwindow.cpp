@@ -2,7 +2,9 @@
 #include "ui_mainwindow.h"
 
 #include "canvasview.h"
+#include "codehighlighter.h"
 #include "findbar.h"
+#include "fontcombo.h"
 #include "fontlibrary.h"
 #include "iconfactory.h"
 #include "pagedocumentitem.h"
@@ -20,18 +22,21 @@
 #include <QColor>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QFileInfo>
 #include <QFont>
-#include <QFontComboBox>
 #include <QGraphicsScene>
+#include <QGraphicsOpacityEffect>
 #include <QImage>
 #include <QIntValidator>
 #include <QKeySequence>
 #include <QLabel>
+#include <QLineEdit>
 #include <QList>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPageLayout>
@@ -41,7 +46,9 @@
 #include <QPdfWriter>
 #include <QPrintDialog>
 #include <QPrinter>
+#include <QPropertyAnimation>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QPixmap>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -83,7 +90,7 @@ MainWindow::MainWindow(QWidget *parent)
     // Roomier, bolder, slightly lowered menu items. rgba hover works in both
     // light and dark themes; text colour is inherited so it adapts too.
     ui->menubar->setStyleSheet(QStringLiteral(
-        "QMenuBar { padding: 6px 8px 4px 8px; font-size: 15px; font-weight: bold; }"
+        "QMenuBar { padding: 6px 8px 2px 8px; font-size: 15px; font-weight: bold; }"
         "QMenuBar::item { padding: 6px 8px; margin: 0px 4px; background: transparent;"
         " border-radius: 6px; }"
         "QMenuBar::item:selected { background: rgba(128,128,128,0.28); }"
@@ -94,6 +101,7 @@ MainWindow::MainWindow(QWidget *parent)
     setupToolBar();
     setupStatusBar();
     connectActions();
+    setupShortcutFeedback();
     refreshIcons();
     applyPageSetup();
 
@@ -193,7 +201,7 @@ void MainWindow::setupToolBar()
     tb->addAction(ui->actionRedo);
     tb->addSeparator();
 
-    m_fontCombo = new QFontComboBox(tb);
+    m_fontCombo = new FontCombo(tb);
     m_fontCombo->setMaximumWidth(190);
     m_fontCombo->setToolTip(tr("Font family"));
     tb->addWidget(m_fontCombo);
@@ -314,7 +322,13 @@ void MainWindow::connectActions()
     ui->actionCopy->setEnabled(false);
 
     // Find / replace
-    connect(ui->actionFind, &QAction::triggered, this, [this] { m_findBar->activate(); });
+    // Ctrl/Cmd+F toggles: summon the bar, or dismiss it if it's already up.
+    connect(ui->actionFind, &QAction::triggered, this, [this] {
+        if (m_findBar->isVisible())
+            m_findBar->dismiss();
+        else
+            m_findBar->activate();
+    });
     connect(ui->actionPageSetup, &QAction::triggered, this, &MainWindow::openPageSetup);
 
     auto findFlags = [](bool forward, bool cs, bool whole) {
@@ -386,9 +400,14 @@ void MainWindow::connectActions()
     connect(ui->actionAlignJustify, &QAction::triggered, this,
             [this] { m_editor->setAlignmentValue(Qt::AlignJustify); });
 
-    connect(m_fontCombo, &QFontComboBox::currentFontChanged, this,
+    connect(m_fontCombo, &FontCombo::currentFontChanged, this,
             &MainWindow::onFontFamilyChanged);
     connect(m_sizeCombo, &QComboBox::textActivated, this, &MainWindow::onFontSizeChanged);
+    // textActivated only fires for items already in the list, so a typed-in size
+    // (e.g. 37) needs the line edit's Return to apply as well.
+    if (QLineEdit *sizeEdit = m_sizeCombo->lineEdit())
+        connect(sizeEdit, &QLineEdit::returnPressed, this,
+                [this] { onFontSizeChanged(m_sizeCombo->currentText()); });
 
     // View / zoom
     connect(ui->actionZoomIn, &QAction::triggered, this, [this] { setZoom(m_zoom + 10); });
@@ -397,6 +416,8 @@ void MainWindow::connectActions()
     connect(ui->actionShowRuler, &QAction::toggled, this, [this](bool on) {
         m_ruler->setVisible(on);
     });
+    connect(ui->actionMarkdownSource, &QAction::toggled, this,
+            [this](bool on) { setMarkdownSourceMode(on); });
     // Text always wraps to the fixed page width, so word-wrap toggling is moot.
     ui->actionWordWrap->setVisible(false);
     connect(m_zoomCombo, &QComboBox::textActivated, this, [this](const QString &t) {
@@ -452,6 +473,57 @@ void MainWindow::connectActions()
     connect(m_editor, &PageDocumentItem::openFileRequested, this, &MainWindow::openPath);
 }
 
+// When an action runs from a keyboard shortcut there's no visual feedback at
+// all — the menu never opens. Briefly glow the menu that owns the action so the
+// user can see what fired (and learn where it lives).
+void MainWindow::setupShortcutFeedback()
+{
+    const QList<QMenu *> menus = {ui->menuFile, ui->menuEdit, ui->menuInsert,
+                                  ui->menuFormat, ui->menuView, ui->menuHelp};
+    for (QMenu *menu : menus) {
+        QAction *title = menu->menuAction();
+        for (QAction *a : menu->actions()) {
+            if (a->isSeparator() || a->shortcut().isEmpty())
+                continue;
+            connect(a, &QAction::triggered, this, [this, title] {
+                // A popup is up only when the user picked the item from the menu
+                // by hand; in that case they already have feedback.
+                if (QApplication::activePopupWidget())
+                    return;
+                flashMenu(title);
+            });
+        }
+    }
+}
+
+void MainWindow::flashMenu(QAction *menuAction)
+{
+    const QRect r = ui->menubar->actionGeometry(menuAction);
+    if (r.isEmpty())
+        return;
+
+    auto *glow = new QWidget(ui->menubar);
+    glow->setGeometry(r);
+    glow->setAttribute(Qt::WA_TransparentForMouseEvents);
+    const QColor hl = palette().color(QPalette::Highlight);
+    glow->setStyleSheet(QStringLiteral("background: rgba(%1,%2,%3,120); border-radius: 5px;")
+                            .arg(hl.red()).arg(hl.green()).arg(hl.blue()));
+
+    auto *fade = new QGraphicsOpacityEffect(glow);
+    fade->setOpacity(1.0);
+    glow->setGraphicsEffect(fade);
+    glow->show();
+    glow->raise();
+
+    auto *anim = new QPropertyAnimation(fade, "opacity", glow);
+    anim->setDuration(550);
+    anim->setStartValue(1.0);
+    anim->setEndValue(0.0);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    connect(anim, &QPropertyAnimation::finished, glow, &QObject::deleteLater);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
 void MainWindow::refreshIcons()
 {
     const QColor c = palette().color(QPalette::WindowText);
@@ -497,12 +569,12 @@ void MainWindow::openFile()
     if (!maybeSave())
         return;
     QSettings settings;
-    const QString lastDir = settings.value(QStringLiteral("io/lastDir")).toString();
+    const QString lastDir = usableDir(settings.value(QStringLiteral("io/lastDir")).toString());
     const QString fn = QFileDialog::getOpenFileName(
         this, tr("Open"), lastDir,
-        tr("All Supported (*.note *.txt *.md *.markdown *.html *.htm);;"
+        tr("All Supported (*.note *.txt *.md *.markdown *.html *.htm *.json *.yaml *.yml);;"
            "Notepad Note (*.note);;Text (*.txt);;Markdown (*.md *.markdown);;"
-           "HTML (*.html *.htm);;All Files (*)"));
+           "HTML (*.html *.htm);;JSON (*.json);;YAML (*.yaml *.yml);;All Files (*)"));
     if (fn.isEmpty())
         return;
     settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(fn).absolutePath());
@@ -518,10 +590,31 @@ void MainWindow::openPath(const QString &path)
         setCurrentFile(path);
 }
 
+// A remembered directory is only useful if it still exists — folders get
+// renamed and moved between sessions. Falls back to Documents.
+QString MainWindow::usableDir(const QString &dir)
+{
+    if (!dir.isEmpty() && QFileInfo(dir).isDir())
+        return dir;
+    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+}
+
 bool MainWindow::saveFile()
 {
     if (m_filePath.isEmpty())
         return saveFileAs();
+
+    // The document's folder may have been renamed, moved or deleted since it was
+    // opened. Writing would just fail with "cannot open", so explain what
+    // happened and let the user re-place the file instead.
+    if (!QFileInfo(m_filePath).absoluteDir().exists()) {
+        QMessageBox::information(
+            this, tr("Notepad"),
+            tr("The folder for \"%1\" no longer exists — it may have been renamed, "
+               "moved or deleted.\n\nChoose where to save the document.")
+                .arg(QFileInfo(m_filePath).fileName()));
+        return saveFileAs();
+    }
     return writeToFile(m_filePath);
 }
 
@@ -531,14 +624,18 @@ bool MainWindow::saveFileAs()
     // Restore the last-used directory and format/filter from the previous save.
     QString selectedFilter = settings.value(QStringLiteral("io/lastSaveFilter")).toString();
     QString suggested = m_filePath;
+    // If the current document's folder vanished (renamed/moved), keep the file
+    // name but re-anchor it to a directory that still exists.
+    if (!suggested.isEmpty() && !QFileInfo(suggested).absoluteDir().exists())
+        suggested = usableDir(QString()) + QLatin1Char('/') + QFileInfo(suggested).fileName();
     if (suggested.isEmpty()) {
-        const QString lastDir = settings.value(QStringLiteral("io/lastDir")).toString();
-        suggested = (lastDir.isEmpty() ? QString() : lastDir + QLatin1Char('/'))
-                    + QStringLiteral("Untitled.note");
+        const QString lastDir = usableDir(settings.value(QStringLiteral("io/lastDir")).toString());
+        suggested = lastDir + QLatin1Char('/') + QStringLiteral("Untitled.note");
     }
     QString fn = QFileDialog::getSaveFileName(
         this, tr("Save As"), suggested,
-        tr("Notepad Note (*.note);;Text (*.txt);;Markdown (*.md);;HTML (*.html)"),
+        tr("Notepad Note (*.note);;Text (*.txt);;Markdown (*.md);;HTML (*.html);;"
+           "JSON (*.json);;YAML (*.yaml *.yml)"),
         &selectedFilter);
     if (fn.isEmpty())
         return false;
@@ -551,6 +648,10 @@ bool MainWindow::saveFileAs()
             fn += QStringLiteral(".md");
         else if (selectedFilter.contains(QStringLiteral(".html")))
             fn += QStringLiteral(".html");
+        else if (selectedFilter.contains(QStringLiteral(".json")))
+            fn += QStringLiteral(".json");
+        else if (selectedFilter.contains(QStringLiteral(".yaml")))
+            fn += QStringLiteral(".yaml");
         else
             fn += QStringLiteral(".note");
     }
@@ -605,7 +706,8 @@ static bool documentHasRichFormatting(const QTextDocument *doc)
 
 bool MainWindow::confirmLossySave(const QString &suffix)
 {
-    const bool isTxt = (suffix == QLatin1String("txt"));
+    const bool isTxt = (suffix == QLatin1String("txt") || suffix == QLatin1String("json")
+                        || suffix == QLatin1String("yaml") || suffix == QLatin1String("yml"));
     const bool isMd  = (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"));
     if (!isTxt && !isMd)
         return true;   // .note / .html are lossless
@@ -660,6 +762,70 @@ bool MainWindow::writeToFile(const QString &path)
     return true;
 }
 
+// Data/code files (JSON, YAML) get a monospace page and syntax colouring;
+// everything else reverts to the normal prose font with highlighting off.
+void MainWindow::applySyntaxMode(const QString &suffix)
+{
+    if (!m_highlighter)
+        m_highlighter = new CodeHighlighter(m_editor->document());
+
+    const CodeHighlighter::Language lang = CodeHighlighter::languageForSuffix(suffix);
+    if (lang != CodeHighlighter::Language::None) {
+        m_baseFontFamily = QStringLiteral("JetBrains Mono");
+        applyBaseFont();
+    }
+    m_highlighter->setLanguage(lang);
+    m_updatingControls = true;
+    m_fontCombo->setCurrentFont(QFont(m_baseFontFamily));
+    m_updatingControls = false;
+}
+
+// Raw Markdown ⇄ rendered document. Converting through toMarkdown()/setMarkdown()
+// round-trips cleanly for Markdown content and carries edits across the switch,
+// so the toggle is only offered for .md files — running a .note with images and
+// tables through Markdown would quietly drop them.
+void MainWindow::setMarkdownSourceMode(bool raw)
+{
+    if (raw == m_mdSourceMode)
+        return;
+    m_mdSourceMode = raw;
+
+    QTextDocument *doc = m_editor->document();
+    const bool wasModified = doc->isModified();
+    if (raw) {
+        const QString md = doc->toMarkdown();
+        doc->setPlainText(md);
+        m_baseFontFamily = QStringLiteral("JetBrains Mono");
+    } else {
+        const QString md = doc->toPlainText();
+        doc->setMarkdown(md);
+        m_baseFontFamily = FontLibrary::defaultFamily().isEmpty()
+                               ? doc->defaultFont().family()
+                               : FontLibrary::defaultFamily();
+    }
+    applyBaseFont();
+    m_updatingControls = true;
+    m_fontCombo->setCurrentFont(QFont(m_baseFontFamily));
+    m_updatingControls = false;
+
+    m_editor->documentReset();
+    doc->setModified(wasModified);      // a view switch is not an edit
+    setWindowModified(wasModified);
+    updateWordCount();
+    statusBar()->showMessage(raw ? tr("Markdown source") : tr("Formatted view"), 1500);
+}
+
+void MainWindow::updateMarkdownActionState()
+{
+    const QString suffix = QFileInfo(m_filePath).suffix().toLower();
+    const bool isMd = (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"));
+    ui->actionMarkdownSource->setEnabled(isMd);
+    if (!isMd && m_mdSourceMode) {
+        m_mdSourceMode = false;         // leaving Markdown: drop back to rendered
+        ui->actionMarkdownSource->setChecked(false);
+    }
+}
+
 bool MainWindow::loadFromFile(const QString &path)
 {
     const QString suffix = QFileInfo(path).suffix().toLower();
@@ -682,6 +848,7 @@ bool MainWindow::loadFromFile(const QString &path)
     else
         m_editor->document()->setPlainText(text);
 
+    applySyntaxMode(suffix);
     m_editor->documentReset();
     m_editor->document()->setModified(false);
     updateWordCount();
@@ -848,6 +1015,7 @@ void MainWindow::setCurrentFile(const QString &path)
     const QString name = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
     setWindowTitle(tr("%1[*] %2 Notepad").arg(name, QString(QChar(0x2014))));
     setWindowFilePath(path);
+    updateMarkdownActionState();
 }
 
 bool MainWindow::maybeSave()

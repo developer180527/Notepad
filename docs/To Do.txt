@@ -1,1 +1,0 @@
-Need to make the notepad save system adjust to directory name changes. 

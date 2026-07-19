@@ -6,6 +6,8 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QHBoxLayout>
+#include <QPushButton>
 #include <QLabel>
 #include <QVBoxLayout>
 
@@ -66,6 +68,18 @@ PageSetupDialog::PageSetupDialog(QPageSize::PageSizeId paper,
     grid->addWidget(new QLabel(tr("Right")), 1, 2);
     grid->addWidget(m_right, 1, 3);
 
+    // Quick presets — "Full page" zeroes every margin so the text area expands
+    // right to the edge of the sheet (the layout supports it, it was just buried
+    // behind typing 0 into four boxes).
+    auto *presets = new QHBoxLayout;
+    auto *fullPage = new QPushButton(tr("Full page (no margins)"), this);
+    auto *normal = new QPushButton(tr("Normal (25 mm)"), this);
+    connect(fullPage, &QPushButton::clicked, this, [this] { setAllMargins(0.0); });
+    connect(normal, &QPushButton::clicked, this, [this] { setAllMargins(25.0); });
+    presets->addWidget(fullPage);
+    presets->addWidget(normal);
+    presets->addStretch();
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -73,7 +87,16 @@ PageSetupDialog::PageSetupDialog(QPageSize::PageSizeId paper,
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addWidget(marginsBox);
+    layout->addLayout(presets);
     layout->addWidget(buttons);
+}
+
+void PageSetupDialog::setAllMargins(double mm)
+{
+    m_top->setValue(mm);
+    m_bottom->setValue(mm);
+    m_left->setValue(mm);
+    m_right->setValue(mm);
 }
 
 QPageSize::PageSizeId PageSetupDialog::paperSize() const

@@ -22,6 +22,8 @@ public:
     QMarginsF marginsMm() const;
 
 private:
+    void setAllMargins(double mm);   // margin presets (full page / normal)
+
     QComboBox *m_paper = nullptr;
     QComboBox *m_orientation = nullptr;
     QDoubleSpinBox *m_top = nullptr;

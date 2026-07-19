@@ -15,6 +15,7 @@ public:
     explicit FindBar(QWidget *parent = nullptr);
 
     void activate();          // show, focus and select the find field
+    void dismiss();           // hide and notify (close button, Esc, Ctrl/Cmd+F toggle)
 
 signals:
     // Emitted live as the find text / options change, for highlighting all matches.

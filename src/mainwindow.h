@@ -9,14 +9,16 @@
 #include <QString>
 
 class PageDocumentItem;
+class CodeHighlighter;
+class FontCombo;
 class CanvasView;
 class FindBar;
 class RulerWidget;
 class QGraphicsScene;
-class QFontComboBox;
 class QComboBox;
 class QSlider;
 class QLabel;
+class QAction;
 class QActionGroup;
 class QFont;
 class QTextCharFormat;
@@ -50,6 +52,8 @@ private:
     void setupToolBar();
     void setupStatusBar();
     void connectActions();
+    void setupShortcutFeedback();          // flash a menu when its shortcut fires
+    void flashMenu(QAction *menuAction);
     void refreshIcons();
     void applyCanvasTheme();
     void updateSceneRect();
@@ -63,7 +67,11 @@ private:
     void printDocument();
     bool maybeSave();
     bool writeToFile(const QString &path);
+    static QString usableDir(const QString &dir);   // dir if it still exists, else Documents
     bool confirmLossySave(const QString &suffix);   // warn before saving rich doc to txt/md
+    void applySyntaxMode(const QString &suffix);    // monospace + JSON/YAML highlighting
+    void setMarkdownSourceMode(bool raw);           // raw .md text vs rendered document
+    void updateMarkdownActionState();
     bool loadFromFile(const QString &path);
     bool writeNote(const QString &path);
     bool readNote(const QString &path);
@@ -100,8 +108,9 @@ private:
     QGraphicsScene *m_scene = nullptr;
     FindBar *m_findBar = nullptr;
     RulerWidget *m_ruler = nullptr;
+    CodeHighlighter *m_highlighter = nullptr;
 
-    QFontComboBox *m_fontCombo = nullptr;
+    FontCombo *m_fontCombo = nullptr;
     QComboBox *m_sizeCombo = nullptr;
     QComboBox *m_zoomCombo = nullptr;
     QComboBox *m_fitCombo = nullptr;
@@ -118,6 +127,7 @@ private:
     qreal m_baseFontSize = 12.0;
     int m_zoom = 100;
     bool m_updatingControls = false;
+    bool m_mdSourceMode = false;    // View ▸ Markdown Source is active
 
     QPageSize::PageSizeId m_paperId = QPageSize::A4;
     QPageLayout::Orientation m_orientation = QPageLayout::Portrait;

@@ -75,10 +75,7 @@ FindBar::FindBar(QWidget *parent)
     connect(replaceAll, &QToolButton::clicked, this, [this] {
         emit replaceAllRequested(m_find->text(), m_replace->text(), caseSensitive(), wholeWords());
     });
-    connect(close, &QToolButton::clicked, this, [this] {
-        hide();
-        emit closed();
-    });
+    connect(close, &QToolButton::clicked, this, [this] { dismiss(); });
 }
 
 void FindBar::activate()
@@ -86,6 +83,12 @@ void FindBar::activate()
     show();
     m_find->setFocus();
     m_find->selectAll();
+}
+
+void FindBar::dismiss()
+{
+    hide();
+    emit closed();
 }
 
 bool FindBar::caseSensitive() const { return m_case->isChecked(); }
@@ -99,8 +102,7 @@ void FindBar::emitFind(bool forward)
 void FindBar::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
-        hide();
-        emit closed();
+        dismiss();
         event->accept();
         return;
     }

@@ -5,28 +5,37 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport LinguistT
 
 qt_standard_project_setup()
 
+# Sources live in src/; assets, fonts and the per-platform integration files
+# stay at the repo root, so all paths below are root-relative.
 qt_add_executable(Notepad
     WIN32 MACOSX_BUNDLE
-    main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    mainwindow.ui
-    pagedocumentitem.cpp
-    pagedocumentitem.h
-    iconfactory.h
-    canvasview.cpp
-    canvasview.h
-    findbar.cpp
-    findbar.h
-    pagesetupdialog.cpp
-    pagesetupdialog.h
-    rulerwidget.cpp
-    rulerwidget.h
-    fontlibrary.cpp
-    fontlibrary.h
-    winregister.cpp
-    winregister.h
+    src/main.cpp
+    src/mainwindow.cpp
+    src/mainwindow.h
+    src/mainwindow.ui
+    src/pagedocumentitem.cpp
+    src/pagedocumentitem.h
+    src/iconfactory.h
+    src/codehighlighter.cpp
+    src/fontcombo.cpp
+    src/fontcombo.h
+    src/codehighlighter.h
+    src/canvasview.cpp
+    src/canvasview.h
+    src/findbar.cpp
+    src/findbar.h
+    src/pagesetupdialog.cpp
+    src/pagesetupdialog.h
+    src/rulerwidget.cpp
+    src/rulerwidget.h
+    src/fontlibrary.cpp
+    src/fontlibrary.h
+    src/winregister.cpp
+    src/winregister.h
 )
+
+# So headers resolve as "mainwindow.h" regardless of which dir a source is in.
+target_include_directories(Notepad PRIVATE src)
 
 # Embed the bundled portable fonts as :/fonts/*.ttf (AUTORCC is not enabled by
 # qt_standard_project_setup, so register them explicitly).

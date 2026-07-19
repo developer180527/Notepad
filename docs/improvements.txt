@@ -1,0 +1,11 @@
+* Need to make the notepad save system adjust to directory name changes. 
+* Need to make the text size be set to any number even if nothing is selected.
+* The app should be able to edit/view JSON and YAML files.  
+* Need to make the Qt text box expandable to the complete edge of the visual page.
+* Need to refine MacOS's quicklook (need to be made much later)
+* Need to optimize the startup time of the app so it opens as quick as possible.
+* Need to add a settings button which gives option for dark visual page or change theme of the app.
+* Make the menubar button glow for a sec when doing action in them using keyboard shortcuts.
+* Add a view mode so md files could be viewed in raw format or presentable format
+* Make cmd + f (mac) or control + f also close the find and replace bar and not just summon it. 
+* Add spelling checking feature and right click actions like look up meaning / pronunctation 
