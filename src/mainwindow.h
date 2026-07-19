@@ -45,6 +45,21 @@ public:
     // Open a file by path (used by drag-drop, command line and macOS open events).
     void openPath(const QString &path);
 
+    // --- multi-window ---
+    // A new, registered, shown window. Windows are heap-owned and delete
+    // themselves on close.
+    static MainWindow *createWindow();
+    // Send a file to the right place: the window that already has it open, else
+    // the most recently active window, else a new one. This is the single entry
+    // point for Finder/Explorer double-clicks and command-line paths.
+    static void routeOpenPath(const QString &path);
+    static MainWindow *mostRecentWindow();
+
+    // Move a document here from another window (tab detach / merge, Phase 4).
+    void adoptDocument(DocumentView *doc, int atIndex = -1);
+    DocumentView *takeDocument(int index);      // detach without destroying
+    int documentCount() const;
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -65,6 +80,10 @@ private:
     void bindDocument();                             // re-point chrome at the current tab
     bool closeDocumentAt(int index);                 // prompts to save; false = cancelled
     void updateTabLabel(DocumentView *doc);
+    void startTabDrag(int index);                    // tab pulled out of the strip
+    void detachToNewWindow(DocumentView *doc, const QPoint &globalPos);
+    static MainWindow *createWindowForAdoption();    // window with no initial document
+    void registerDocument(DocumentView *doc);   // window-level bookkeeping hookups
     bool maybeSaveDocument(DocumentView *doc);       // save prompt for one document
     void connectActions();
     void setupShortcutFeedback();          // flash a menu when its shortcut fires
@@ -114,6 +133,13 @@ private:
     QStackedWidget *m_stack = nullptr;
     DocumentTabBar *m_tabs = nullptr;
     QList<QMetaObject::Connection> m_docConnections;   // rebound on every tab switch
+
+    // Most-recently-activated first; used to pick a target for external opens.
+    static QList<MainWindow *> s_windows;
+    // In-flight tab drag. Same-process only, so the document travels by pointer
+    // and the mime data is just a marker.
+    static DocumentView *s_dragDoc;
+    static MainWindow *s_dragSource;
     FindBar *m_findBar = nullptr;
 
     FontCombo *m_fontCombo = nullptr;

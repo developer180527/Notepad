@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(Notepad VERSION 2.2.0 LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport Network LinguistTools)
 
 qt_standard_project_setup()
 
@@ -19,6 +19,8 @@ qt_add_executable(Notepad
     src/codehighlighter.cpp
     src/documentview.cpp
     src/documenttabbar.cpp
+    src/singleinstance.cpp
+    src/singleinstance.h
     src/documenttabbar.h
     src/documentview.h
     src/fontcombo.cpp
@@ -70,6 +72,7 @@ target_link_libraries(Notepad
         Qt::Widgets
         Qt::Svg
         Qt::PrintSupport
+        Qt::Network
 )
 
 # macOS: register the .note document type, and add Quick Look + thumbnail

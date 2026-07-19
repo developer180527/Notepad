@@ -57,6 +57,8 @@
 #include <QSet>
 #include <QSlider>
 #include <QSpinBox>
+#include <QDrag>
+#include <QMimeData>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QStatusBar>
@@ -76,6 +78,10 @@
 
 #include <cmath>
 
+QList<MainWindow *> MainWindow::s_windows;
+DocumentView *MainWindow::s_dragDoc = nullptr;
+MainWindow *MainWindow::s_dragSource = nullptr;
+
 namespace {
 constexpr quint32 kNoteVersion = 3;   // v2 adds fonts; v3 adds a preview image
 const char *kNoteMagic = "PPNOTE";
@@ -87,6 +93,8 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    setAttribute(Qt::WA_DeleteOnClose);
+    s_windows.prepend(this);
 
     FontLibrary::load();   // register bundled portable fonts
 
@@ -128,6 +136,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    s_windows.removeAll(this);
     delete ui;
 }
 
@@ -156,6 +165,26 @@ void MainWindow::setupWorkspace()
     connect(m_tabs, &QTabBar::tabCloseRequested, this,
             [this](int index) { closeDocumentAt(index); });
     connect(m_tabs, &DocumentTabBar::newTabRequested, this, &MainWindow::newFile);
+    connect(m_tabs, &DocumentTabBar::tabDragOut, this, &MainWindow::startTabDrag);
+    connect(m_tabs, &DocumentTabBar::tabDropped, this, [this](int atIndex) {
+        // A tab from another window (or this one) was dropped on our strip.
+        DocumentView *doc = s_dragDoc;
+        MainWindow *source = s_dragSource;
+        if (!doc || !source)
+            return;
+        s_dragDoc = nullptr;                 // claimed: suppress the detach fallback
+        if (source == this) {
+            const int from = indexOfDocument(doc);
+            if (from >= 0 && atIndex >= 0 && from != atIndex)
+                m_tabs->moveTab(from, atIndex);
+            return;
+        }
+        const int from = source->indexOfDocument(doc);
+        if (from < 0)
+            return;
+        source->takeDocument(from);
+        adoptDocument(doc, atIndex);
+    });
     // Dragging a tab reorders the bar only; the stack has to follow so indices
     // keep lining up.
     connect(m_tabs, &QTabBar::tabMoved, this, [this](int from, int to) {
@@ -199,15 +228,7 @@ DocumentView *MainWindow::addDocument()
     m_tabs->insertTab(index, doc->displayName());
     m_tabs->setDocumentLabel(index, doc->displayName(), false);
 
-    // Window-level bookkeeping that must run for *every* document, current or
-    // not: a background tab still needs its label to show unsaved changes.
-    connect(doc, &DocumentView::modifiedChanged, this, [this, doc](bool) { updateTabLabel(doc); });
-    connect(doc, &DocumentView::filePathChanged, this, [this, doc](const QString &) {
-        updateTabLabel(doc);
-        if (doc == m_doc)
-            setWindowTitle(tr("%1[*] %2 Notepad").arg(doc->displayName(), QString(QChar(0x2014))));
-    });
-    connect(doc, &DocumentView::openFileRequested, this, &MainWindow::openPath);
+    registerDocument(doc);
 
     doc->setRulerVisible(ui->actionShowRuler->isChecked());
     applyCanvasTheme();
@@ -216,6 +237,20 @@ DocumentView *MainWindow::addDocument()
     m_stack->setCurrentIndex(index);
     bindDocument();
     return doc;
+}
+
+// Window-level bookkeeping that must run for *every* document, current or not:
+// a background tab still needs its label to show unsaved changes. Re-applied
+// when a document is adopted from another window.
+void MainWindow::registerDocument(DocumentView *doc)
+{
+    connect(doc, &DocumentView::modifiedChanged, this, [this, doc](bool) { updateTabLabel(doc); });
+    connect(doc, &DocumentView::filePathChanged, this, [this, doc](const QString &) {
+        updateTabLabel(doc);
+        if (doc == m_doc)
+            setWindowTitle(tr("%1[*] %2 Notepad").arg(doc->displayName(), QString(QChar(0x2014))));
+    });
+    connect(doc, &DocumentView::openFileRequested, this, &MainWindow::openPath);
 }
 
 void MainWindow::updateTabLabel(DocumentView *doc)
@@ -322,6 +357,162 @@ bool MainWindow::closeDocumentAt(int index)
     else
         bindDocument();
     return true;
+}
+
+// A tab was pulled clear of the strip. Run a drag so it can be dropped on
+// another window's strip (merge); if it lands nowhere, it becomes its own
+// window (detach).
+void MainWindow::startTabDrag(int index)
+{
+    DocumentView *doc = documentAt(index);
+    if (!doc)
+        return;
+    // Dragging the only tab would just destroy and recreate this window for no
+    // benefit — treat it as a no-op, like Chrome does.
+    if (m_stack->count() <= 1)
+        return;
+
+    s_dragDoc = doc;
+    s_dragSource = this;
+
+    auto *mime = new QMimeData;
+    mime->setData(DocumentTabBar::tabMimeType(), QByteArray::number(1));
+
+    QDrag drag(this);
+    drag.setMimeData(mime);
+    const QRect tabRect = m_tabs->tabRect(index);
+    if (tabRect.isValid())
+        drag.setPixmap(m_tabs->grab(tabRect));
+    drag.setHotSpot(QPoint(tabRect.width() / 2, tabRect.height() / 2));
+
+    drag.exec(Qt::MoveAction);
+
+    // Still ours after the drag? Then nothing accepted the drop — detach.
+    if (s_dragDoc == doc)
+        detachToNewWindow(doc, QCursor::pos());
+    s_dragDoc = nullptr;
+    s_dragSource = nullptr;
+}
+
+void MainWindow::detachToNewWindow(DocumentView *doc, const QPoint &globalPos)
+{
+    const int index = indexOfDocument(doc);
+    if (index < 0 || m_stack->count() <= 1)
+        return;
+
+    MainWindow *w = createWindowForAdoption();
+    takeDocument(index);           // safe: guarded above, so we never self-close
+    w->adoptDocument(doc);
+    // Place the new window near the cursor, offset so the title bar is grabbable.
+    w->move(globalPos - QPoint(80, 20));
+    w->show();
+    w->raise();
+    w->activateWindow();
+}
+
+// A window that starts empty, because a document is about to be moved into it.
+// The normal constructor opens an untitled document, which would leave a stray
+// blank tab beside the adopted one.
+MainWindow *MainWindow::createWindowForAdoption()
+{
+    auto *w = new MainWindow;
+    while (w->m_stack->count() > 0) {
+        DocumentView *d = w->documentAt(0);
+        w->m_stack->removeWidget(d);
+        w->m_tabs->removeTab(0);
+        delete d;
+    }
+    w->m_doc = nullptr;
+    return w;
+}
+
+MainWindow *MainWindow::createWindow()
+{
+    auto *w = new MainWindow;      // registers itself; WA_DeleteOnClose owns it
+    w->show();
+    return w;
+}
+
+MainWindow *MainWindow::mostRecentWindow()
+{
+    return s_windows.isEmpty() ? nullptr : s_windows.first();
+}
+
+int MainWindow::documentCount() const
+{
+    return m_stack ? m_stack->count() : 0;
+}
+
+// The single entry point for externally requested opens (Finder/Explorer
+// double-click, command line, a second instance forwarding its arguments).
+void MainWindow::routeOpenPath(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+
+    // Already open in some window? Surface that tab instead of a second copy.
+    for (MainWindow *w : std::as_const(s_windows)) {
+        const int index = w->indexOfFile(path);
+        if (index >= 0) {
+            w->m_tabs->setCurrentIndex(index);
+            w->show();
+            w->raise();
+            w->activateWindow();
+            return;
+        }
+    }
+
+    MainWindow *w = mostRecentWindow();
+    if (!w)
+        w = createWindow();
+    w->openPath(path);
+    w->show();
+    w->raise();
+    w->activateWindow();
+}
+
+// --- moving documents between windows (tab detach / merge) ---
+
+DocumentView *MainWindow::takeDocument(int index)
+{
+    DocumentView *doc = documentAt(index);
+    if (!doc)
+        return nullptr;
+
+    // Drop this window's bookkeeping connections; the new owner remakes them.
+    disconnect(doc, nullptr, this, nullptr);
+
+    m_stack->removeWidget(doc);
+    m_tabs->removeTab(index);
+    doc->setParent(nullptr);
+
+    if (m_stack->count() == 0)
+        close();                   // last document left: the window goes with it
+    else
+        bindDocument();
+    return doc;
+}
+
+void MainWindow::adoptDocument(DocumentView *doc, int atIndex)
+{
+    if (!doc)
+        return;
+    const int index = (atIndex < 0 || atIndex > m_stack->count()) ? m_stack->count() : atIndex;
+
+    doc->setParent(m_stack);
+    m_stack->insertWidget(index, doc);
+    m_tabs->insertTab(index, doc->displayName());
+    m_tabs->setDocumentLabel(index, doc->displayName(), doc->isModified());
+    registerDocument(doc);
+
+    doc->setRulerVisible(ui->actionShowRuler->isChecked());
+    applyCanvasTheme();
+    m_tabs->setCurrentIndex(index);
+    m_stack->setCurrentIndex(index);
+    bindDocument();
+    show();
+    raise();
+    activateWindow();
 }
 
 
@@ -1211,6 +1402,10 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 void MainWindow::changeEvent(QEvent *event)
 {
     QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::ActivationChange && isActiveWindow()) {
+        s_windows.removeAll(this);      // keep most-recently-active at the front
+        s_windows.prepend(this);
+    }
     switch (event->type()) {
     case QEvent::PaletteChange:
     case QEvent::ApplicationPaletteChange:

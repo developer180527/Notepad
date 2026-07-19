@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "singleinstance.h"
 #include "winregister.h"
 
 #include <QApplication>
@@ -7,25 +8,25 @@
 #include <QLocale>
 
 #include <cstdlib>
-#include <QPointer>
 #include <QString>
+#include <QStringList>
 #include <QTranslator>
 
 // A QApplication that also routes macOS "open document" events (Finder
-// double-click, drag-onto-dock) to the main window. If the event arrives before
-// the window is ready, the path is buffered and replayed via setWindow().
+// double-click, drag-onto-dock). If an event arrives before any window exists,
+// the path is buffered and replayed once the first window is up.
 class NotepadApplication : public QApplication
 {
 public:
     using QApplication::QApplication;
 
-    void setWindow(MainWindow *window)
+    void flushPendingOpens()
     {
-        m_window = window;
-        if (m_window && !m_pendingFile.isEmpty()) {
-            m_window->openPath(m_pendingFile);
-            m_pendingFile.clear();
-        }
+        const QStringList pending = m_pendingFiles;
+        m_pendingFiles.clear();
+        for (const QString &file : pending)
+            MainWindow::routeOpenPath(file);
+        m_ready = true;
     }
 
 protected:
@@ -33,18 +34,18 @@ protected:
     {
         if (e->type() == QEvent::FileOpen) {
             const QString file = static_cast<QFileOpenEvent *>(e)->file();
-            if (m_window)
-                m_window->openPath(file);
+            if (m_ready)
+                MainWindow::routeOpenPath(file);
             else
-                m_pendingFile = file;
+                m_pendingFiles << file;
             return true;
         }
         return QApplication::event(e);
     }
 
 private:
-    QPointer<MainWindow> m_window;
-    QString m_pendingFile;
+    QStringList m_pendingFiles;
+    bool m_ready = false;
 };
 
 int main(int argc, char *argv[])
@@ -55,6 +56,31 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationDomain(QStringLiteral("org.notepad"));
     QApplication::setApplicationName(QStringLiteral("Notepad"));
     a.setWindowIcon(QIcon(QStringLiteral(":/icons/notepad.png")));
+
+    // File paths from the command line: on Windows and Linux this is how a
+    // double-click arrives; on macOS it's a QFileOpenEvent instead.
+    QStringList files = QApplication::arguments().mid(1);
+    files.removeIf([](const QString &s) { return s.startsWith(QLatin1Char('-')); });
+
+    // One process per user. A second launch (another double-click) hands its
+    // paths to the running instance and exits, so documents open as tabs in the
+    // window that's already on screen rather than in a brand-new copy of the app.
+    SingleInstance instance(QStringLiteral("org.notepad.instance"));
+    if (instance.isRunning() && instance.sendPaths(files))
+        return 0;
+    instance.listen();
+    QObject::connect(&instance, &SingleInstance::pathsReceived, &a, [](const QStringList &paths) {
+        for (const QString &p : paths)
+            MainWindow::routeOpenPath(p);
+        if (paths.isEmpty()) {
+            // Bare relaunch (clicking the dock/taskbar icon): surface a window.
+            if (MainWindow *w = MainWindow::mostRecentWindow()) {
+                w->show();
+                w->raise();
+                w->activateWindow();
+            }
+        }
+    });
 
     // On Windows, ensure the .note association + thumbnail handler are registered
     // (per-user). No-op elsewhere.
@@ -70,16 +96,10 @@ int main(int argc, char *argv[])
         }
     }
 
-    MainWindow w;
-    a.setWindow(&w);
-
-    // A file path on the command line (Windows/Linux double-click, or
-    // `Notepad file.note`) opens it directly.
-    const QStringList args = QApplication::arguments();
-    if (args.size() > 1)
-        w.openPath(args.at(1));
-
-    w.show();
+    MainWindow::createWindow();
+    for (const QString &file : std::as_const(files))
+        MainWindow::routeOpenPath(file);
+    a.flushPendingOpens();     // replay any macOS open events that beat the window
 
     const int status = QApplication::exec();
 
