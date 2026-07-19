@@ -63,6 +63,7 @@
 #include <QTextDocumentFragment>
 #include <QTextFragment>
 #include <QTextImageFormat>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUrl>
@@ -74,6 +75,7 @@
 namespace {
 constexpr quint32 kNoteVersion = 3;   // v2 adds fonts; v3 adds a preview image
 const char *kNoteMagic = "PPNOTE";
+constexpr int kBarHeight = 36;        // shared menu bar / tool bar height
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -90,11 +92,15 @@ MainWindow::MainWindow(QWidget *parent)
     // Roomier, bolder, slightly lowered menu items. rgba hover works in both
     // light and dark themes; text colour is inherited so it adapts too.
     ui->menubar->setStyleSheet(QStringLiteral(
-        "QMenuBar { padding: 6px 8px 2px 8px; font-size: 15px; font-weight: bold; }"
-        "QMenuBar::item { padding: 6px 8px; margin: 0px 4px; background: transparent;"
+        "QMenuBar { padding: 0px 8px; font-size: 15px; font-weight: bold;"
+        " border: 0px; }"
+        "QMenuBar::item { padding: 4px 8px; margin: 0px 4px; background: transparent;"
         " border-radius: 6px; }"
         "QMenuBar::item:selected { background: rgba(128,128,128,0.28); }"
         "QMenuBar::item:pressed { background: rgba(128,128,128,0.40); }"));
+    // Menu bar and tool bar read as one band: identical height, no frame or
+    // gap between them.
+    ui->menubar->setFixedHeight(kBarHeight);
 
     setupEditorArea();
     applyCanvasTheme();
@@ -190,8 +196,15 @@ void MainWindow::setupToolBar()
     tb->setObjectName(QStringLiteral("mainToolBar"));
     tb->setMovable(false);
     tb->setFloatable(false);
-    tb->setIconSize(QSize(22, 22));
+    tb->setIconSize(QSize(20, 20));
     tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    // Match the menu bar exactly and drop the frame, so the two form a single
+    // continuous band with no visible division.
+    tb->setFixedHeight(kBarHeight);
+    tb->setStyleSheet(QStringLiteral(
+        "QToolBar { border: 0px; margin: 0px; padding: 0px 4px; spacing: 2px; }"
+        "QToolBar::separator { width: 1px; margin: 6px 5px;"
+        " background: rgba(128,128,128,0.35); }"));
 
     tb->addAction(ui->actionNew);
     tb->addAction(ui->actionOpen);
