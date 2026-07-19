@@ -9,6 +9,7 @@
 #include <QString>
 
 class PageDocumentItem;
+class DocumentView;
 class CodeHighlighter;
 class FontCombo;
 class CanvasView;
@@ -48,15 +49,15 @@ protected:
 
 private:
     // --- setup ---
-    void setupEditorArea();
     void setupToolBar();
     void setupStatusBar();
+    void setupDocument();               // create + wire the DocumentView
+    void syncChromeToDocument();        // toolbar/status/title follow the document
     void connectActions();
     void setupShortcutFeedback();          // flash a menu when its shortcut fires
     void flashMenu(QAction *menuAction);
     void refreshIcons();
     void applyCanvasTheme();
-    void updateSceneRect();
 
     // --- file ---
     void newFile();
@@ -67,14 +68,10 @@ private:
     void printDocument();
     bool maybeSave();
     bool writeToFile(const QString &path);
+    bool loadDocument(const QString &path);
     static QString usableDir(const QString &dir);   // dir if it still exists, else Documents
     bool confirmLossySave(const QString &suffix);   // warn before saving rich doc to txt/md
-    void applySyntaxMode(const QString &suffix);    // monospace + JSON/YAML highlighting
-    void setMarkdownSourceMode(bool raw);           // raw .md text vs rendered document
     void updateMarkdownActionState();
-    bool loadFromFile(const QString &path);
-    bool writeNote(const QString &path);
-    bool readNote(const QString &path);
     void setCurrentFile(const QString &path);
 
     // --- format ---
@@ -87,15 +84,12 @@ private:
     void insertImage();
     void insertTable();
     void syncFormatControls();
-    void applyBaseFont();
 
     // --- view ---
     void setZoom(int percent);
-    void applyFitMode();
 
     // --- find / page setup ---
     void openPageSetup();
-    void applyPageSetup();
 
     // --- status ---
     void updateWordCount();
@@ -103,12 +97,8 @@ private:
 
     Ui::MainWindow *ui;
 
-    PageDocumentItem *m_editor = nullptr;
-    CanvasView *m_view = nullptr;
-    QGraphicsScene *m_scene = nullptr;
+    DocumentView *m_doc = nullptr;      // the open document (one for now)
     FindBar *m_findBar = nullptr;
-    RulerWidget *m_ruler = nullptr;
-    CodeHighlighter *m_highlighter = nullptr;
 
     FontCombo *m_fontCombo = nullptr;
     QComboBox *m_sizeCombo = nullptr;
@@ -120,18 +110,9 @@ private:
     QLabel *m_wordLabel = nullptr;
     QActionGroup *m_alignGroup = nullptr;
 
-    QString m_filePath;
     QColor m_lastTextColor;
     QColor m_lastHighlightColor;
-    QString m_baseFontFamily;
-    qreal m_baseFontSize = 12.0;
-    int m_zoom = 100;
     bool m_updatingControls = false;
-    bool m_mdSourceMode = false;    // View ▸ Markdown Source is active
-
-    QPageSize::PageSizeId m_paperId = QPageSize::A4;
-    QPageLayout::Orientation m_orientation = QPageLayout::Portrait;
-    QMarginsF m_marginsMm{25, 25, 25, 25};
 
     static constexpr int kA4WidthPx = 794;     // 210mm @ 96dpi, matches PageDocumentItem
 };

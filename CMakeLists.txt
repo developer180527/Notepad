@@ -17,6 +17,8 @@ qt_add_executable(Notepad
     src/pagedocumentitem.h
     src/iconfactory.h
     src/codehighlighter.cpp
+    src/documentview.cpp
+    src/documentview.h
     src/fontcombo.cpp
     src/fontcombo.h
     src/codehighlighter.h
