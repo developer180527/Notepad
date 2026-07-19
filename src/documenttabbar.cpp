@@ -5,6 +5,8 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 
 DocumentTabBar::DocumentTabBar(QWidget *parent)
@@ -63,12 +65,75 @@ void DocumentTabBar::mouseReleaseEvent(QMouseEvent *event)
 
 void DocumentTabBar::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton && tabAt(event->position().toPoint()) < 0) {
-        emit newTabRequested();
+    if (event->button() == Qt::LeftButton) {
+        const int index = tabAt(event->position().toPoint());
+        if (index < 0) {
+            emit newTabRequested();
+        } else {
+            beginRename(index);
+        }
         event->accept();
         return;
     }
     QTabBar::mouseDoubleClickEvent(event);
+}
+
+// Inline rename: a line edit laid over the tab, like a file manager. Editing in
+// place keeps the tab's position and neighbours visible, which a modal dialog
+// would hide.
+void DocumentTabBar::beginRename(int index)
+{
+    if (index < 0 || index >= count() || m_editor)
+        return;
+    setCurrentIndex(index);
+    m_editingIndex = index;
+
+    m_editor = new QLineEdit(this);
+    m_editor->setFrame(false);
+    m_editor->setAlignment(Qt::AlignCenter);
+    // tabToolTip holds the clean name; tabText may carry the unsaved bullet.
+    m_editor->setText(tabToolTip(index));
+    m_editor->setGeometry(tabRect(index).adjusted(4, 3, -4, -3));
+    m_editor->show();
+    m_editor->setFocus();
+    // Preselect the base name so typing replaces it but the extension is easy
+    // to keep — the common case is renaming "draft.md", not changing its type.
+    const QString text = m_editor->text();
+    const int dot = text.lastIndexOf(QLatin1Char('.'));
+    if (dot > 0)
+        m_editor->setSelection(0, dot);
+    else
+        m_editor->selectAll();
+
+    connect(m_editor, &QLineEdit::editingFinished, this, [this] { finishRename(true); });
+}
+
+void DocumentTabBar::finishRename(bool commit)
+{
+    if (!m_editor)
+        return;
+    // Detach first: the rename may re-label or rebuild tabs, and re-entering
+    // through editingFinished while tearing down would double-fire.
+    QLineEdit *editor = m_editor;
+    const int index = m_editingIndex;
+    m_editor = nullptr;
+    m_editingIndex = -1;
+    const QString name = editor->text();
+    editor->hide();
+    editor->deleteLater();
+
+    if (commit && index >= 0 && !name.trimmed().isEmpty())
+        emit renameRequested(index, name);
+}
+
+void DocumentTabBar::keyPressEvent(QKeyEvent *event)
+{
+    if (m_editor && event->key() == Qt::Key_Escape) {
+        finishRename(false);
+        event->accept();
+        return;
+    }
+    QTabBar::keyPressEvent(event);
 }
 
 void DocumentTabBar::mousePressEvent(QMouseEvent *event)

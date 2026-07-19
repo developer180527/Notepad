@@ -23,8 +23,13 @@ public:
     // Sets the tab label, marking unsaved documents with a leading dot.
     void setDocumentLabel(int index, const QString &name, bool modified);
 
+    // Begin inline renaming of a tab (double-click, or the context menu).
+    void beginRename(int index);
+
 signals:
     void newTabRequested();
+    // The user committed a new name for this tab.
+    void renameRequested(int index, const QString &newName);
     // The user dragged a tab clear of the strip; the window should start a
     // detach/merge drag for this document.
     void tabDragOut(int index);
@@ -32,6 +37,7 @@ signals:
     void tabDropped(int atIndex);
 
 protected:
+    void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;     // middle-click closes
@@ -41,6 +47,10 @@ protected:
     void dropEvent(QDropEvent *event) override;
 
 private:
+    void finishRename(bool commit);
+
+    class QLineEdit *m_editor = nullptr;
+    int m_editingIndex = -1;
     QPoint m_pressPos;
     int m_pressIndex = -1;
     bool m_dragOutEmitted = false;

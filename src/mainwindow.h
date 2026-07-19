@@ -40,6 +40,9 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    // withInitialDocument=false builds an empty shell for a document that is
+    // about to be moved in — see createWindowForAdoption().
+    explicit MainWindow(bool withInitialDocument, QWidget *parent);
     ~MainWindow() override;
 
     // Open a file by path (used by drag-drop, command line and macOS open events).

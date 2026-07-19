@@ -8,6 +8,7 @@
 
 #include <QBuffer>
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
 #include <QFont>
 #include <QGraphicsScene>
@@ -100,7 +101,56 @@ bool DocumentView::isModified() const
 
 QString DocumentView::displayName() const
 {
-    return m_filePath.isEmpty() ? tr("Untitled") : QFileInfo(m_filePath).fileName();
+    if (!m_filePath.isEmpty())
+        return QFileInfo(m_filePath).fileName();
+    return m_chosenName.isEmpty() ? tr("Untitled") : m_chosenName;
+}
+
+bool DocumentView::rename(const QString &newName, QString *errorOut)
+{
+    const QString trimmed = newName.trimmed();
+    if (trimmed.isEmpty() || trimmed == displayName())
+        return true;                       // nothing to do
+
+    // Reject anything that would move the file somewhere else; renaming a tab
+    // should never silently relocate the document.
+    if (trimmed.contains(QLatin1Char('/')) || trimmed.contains(QLatin1Char('\\'))) {
+        if (errorOut)
+            *errorOut = tr("A name cannot contain path separators.");
+        return false;
+    }
+
+    if (m_filePath.isEmpty()) {
+        m_chosenName = trimmed;            // unsaved: remembered for Save As
+        emit filePathChanged(m_filePath);
+        return true;
+    }
+
+    const QFileInfo info(m_filePath);
+    // Typing a bare name keeps the extension, so renaming "notes.md" to
+    // "journal" doesn't quietly turn it into an extensionless file.
+    QString finalName = trimmed;
+    if (QFileInfo(trimmed).suffix().isEmpty() && !info.suffix().isEmpty())
+        finalName += QLatin1Char('.') + info.suffix();
+
+    const QString newPath = info.absoluteDir().absoluteFilePath(finalName);
+    if (newPath == info.absoluteFilePath())
+        return true;
+    if (QFileInfo::exists(newPath)) {
+        if (errorOut)
+            *errorOut = tr("\"%1\" already exists in this folder.").arg(finalName);
+        return false;
+    }
+    QFile file(m_filePath);
+    if (!file.rename(newPath)) {
+        if (errorOut)
+            *errorOut = tr("Could not rename to \"%1\":\n%2").arg(finalName, file.errorString());
+        return false;
+    }
+
+    m_filePath = newPath;
+    emit filePathChanged(newPath);
+    return true;
 }
 
 bool DocumentView::isMarkdownFile() const

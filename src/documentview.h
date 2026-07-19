@@ -39,7 +39,11 @@ public:
     // --- identity ---
     QString filePath() const { return m_filePath; }
     void setFilePath(const QString &path);
-    QString displayName() const;          // file name, or "Untitled"
+    QString displayName() const;          // file name, or the chosen/placeholder name
+    // Rename the document. For a saved file this renames it on disk; for an
+    // unsaved one it just sets the name Save As will suggest. A bare name keeps
+    // the current extension. false + *errorOut if the rename could not be done.
+    bool rename(const QString &newName, QString *errorOut);
     bool isModified() const;
     bool isMarkdownFile() const;
 
@@ -96,6 +100,7 @@ private:
     CodeHighlighter *m_highlighter = nullptr;
 
     QString m_filePath;
+    QString m_chosenName;      // name for an unsaved document (from a tab rename)
     QString m_baseFontFamily;
     qreal m_baseFontSize = 12.0;
     int m_zoom = 100;

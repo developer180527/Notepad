@@ -101,6 +101,8 @@ int main(int argc, char *argv[])
         MainWindow::routeOpenPath(file);
     a.flushPendingOpens();     // replay any macOS open events that beat the window
 
+
+
     const int status = QApplication::exec();
 
 #ifdef Q_OS_MACOS

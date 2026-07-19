@@ -89,6 +89,11 @@ constexpr int kBarHeight = 36;        // shared menu bar / tool bar height
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
+    : MainWindow(true, parent)
+{
+}
+
+MainWindow::MainWindow(bool withInitialDocument, QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
@@ -122,15 +127,21 @@ MainWindow::MainWindow(QWidget *parent)
     setupShortcutFeedback();
     refreshIcons();
 
-    addDocument();                 // start with one empty document
-    setZoom(100);
+    // Detaching a tab builds a window purely to receive an existing document;
+    // creating an untitled one here (scene, canvas, ruler, page layout) only to
+    // delete it again is the single biggest cost of the tear-off.
+    if (withInitialDocument) {
+        addDocument();
+        setZoom(100);
+    }
 
     // Restore the last window size/position.
     const QByteArray geom = QSettings().value(QStringLiteral("ui/geometry")).toByteArray();
     if (!geom.isEmpty())
         restoreGeometry(geom);
 
-    m_doc->editor()->setFocus();
+    if (m_doc)
+        m_doc->editor()->setFocus();
     statusBar()->showMessage(tr("Ready"), 2000);
 }
 
@@ -166,6 +177,61 @@ void MainWindow::setupWorkspace()
             [this](int index) { closeDocumentAt(index); });
     connect(m_tabs, &DocumentTabBar::newTabRequested, this, &MainWindow::newFile);
     connect(m_tabs, &DocumentTabBar::tabDragOut, this, &MainWindow::startTabDrag);
+    connect(m_tabs, &DocumentTabBar::renameRequested, this,
+            [this](int index, const QString &name) {
+                DocumentView *doc = documentAt(index);
+                if (!doc)
+                    return;
+                QString error;
+                if (!doc->rename(name, &error)) {
+                    QMessageBox::warning(this, tr("Rename"), error);
+                    return;
+                }
+                updateTabLabel(doc);
+                if (doc == m_doc) {
+                    setWindowTitle(tr("%1[*] %2 Notepad")
+                                       .arg(doc->displayName(), QString(QChar(0x2014))));
+                    setWindowFilePath(doc->filePath());
+                }
+            });
+
+    // Tab context menu.
+    m_tabs->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tabs, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const int index = m_tabs->tabAt(pos);
+        if (index < 0)
+            return;
+        QMenu menu;
+        QAction *rename = menu.addAction(tr("Rename..."));
+        QAction *detach = menu.addAction(tr("Move to New Window"));
+        detach->setEnabled(m_stack->count() > 1);
+        menu.addSeparator();
+        QAction *close = menu.addAction(tr("Close"));
+        QAction *others = menu.addAction(tr("Close Others"));
+        others->setEnabled(m_stack->count() > 1);
+        QAction *right = menu.addAction(tr("Close to the Right"));
+        right->setEnabled(index < m_stack->count() - 1);
+
+        QAction *chosen = menu.exec(m_tabs->mapToGlobal(pos));
+        if (chosen == rename) {
+            m_tabs->beginRename(index);
+        } else if (chosen == detach) {
+            if (DocumentView *doc = documentAt(index))
+                detachToNewWindow(doc, QCursor::pos());
+        } else if (chosen == close) {
+            closeDocumentAt(index);
+        } else if (chosen == others) {
+            DocumentView *keep = documentAt(index);
+            // Walk backwards: closing shifts every later index down by one.
+            for (int i = m_stack->count() - 1; i >= 0; --i)
+                if (documentAt(i) != keep && !closeDocumentAt(i))
+                    break;
+        } else if (chosen == right) {
+            for (int i = m_stack->count() - 1; i > index; --i)
+                if (!closeDocumentAt(i))
+                    break;
+        }
+    });
     connect(m_tabs, &DocumentTabBar::tabDropped, this, [this](int atIndex) {
         // A tab from another window (or this one) was dropped on our strip.
         DocumentView *doc = s_dragDoc;
@@ -385,11 +451,24 @@ void MainWindow::startTabDrag(int index)
         drag.setPixmap(m_tabs->grab(tabRect));
     drag.setHotSpot(QPoint(tabRect.width() / 2, tabRect.height() / 2));
 
+    // Build the tear-off window *now*, while the user is still dragging, so a
+    // detach only has to move and show it. Paying for the window after the drop
+    // is what makes tear-off feel laggy. It stays hidden (and is discarded) if
+    // the drop turns out to be a merge.
+    MainWindow *pending = createWindowForAdoption();
+
     drag.exec(Qt::MoveAction);
 
     // Still ours after the drag? Then nothing accepted the drop — detach.
-    if (s_dragDoc == doc)
-        detachToNewWindow(doc, QCursor::pos());
+    if (s_dragDoc == doc) {
+        // Position before adopting: adoptDocument() shows the window, and moving
+        // afterwards would make it appear at the restored geometry and jump.
+        pending->move(QCursor::pos() - QPoint(80, 20));
+        takeDocument(indexOfDocument(doc));
+        pending->adoptDocument(doc);
+    } else {
+        pending->deleteLater();      // merged elsewhere; the shell is unused
+    }
     s_dragDoc = nullptr;
     s_dragSource = nullptr;
 }
@@ -415,15 +494,7 @@ void MainWindow::detachToNewWindow(DocumentView *doc, const QPoint &globalPos)
 // blank tab beside the adopted one.
 MainWindow *MainWindow::createWindowForAdoption()
 {
-    auto *w = new MainWindow;
-    while (w->m_stack->count() > 0) {
-        DocumentView *d = w->documentAt(0);
-        w->m_stack->removeWidget(d);
-        w->m_tabs->removeTab(0);
-        delete d;
-    }
-    w->m_doc = nullptr;
-    return w;
+    return new MainWindow(false, nullptr);
 }
 
 MainWindow *MainWindow::createWindow()
@@ -462,7 +533,15 @@ void MainWindow::routeOpenPath(const QString &path)
         }
     }
 
-    MainWindow *w = mostRecentWindow();
+    // Skip windows that aren't on screen — a tear-off shell pre-built during a
+    // drag is registered but hidden, and must not swallow the document.
+    MainWindow *w = nullptr;
+    for (MainWindow *candidate : std::as_const(s_windows)) {
+        if (candidate->isVisible()) {
+            w = candidate;
+            break;
+        }
+    }
     if (!w)
         w = createWindow();
     w->openPath(path);
@@ -676,6 +755,18 @@ void MainWindow::connectActions()
                                      QKeySequence(QStringLiteral("Ctrl+PgUp"))});
     addAction(ui->actionNextTab);
     addAction(ui->actionPrevTab);
+
+    // Ctrl/Cmd+1..8 select that tab; 9 always means "last", as in browsers.
+    for (int i = 1; i <= 9; ++i) {
+        auto *jump = new QAction(this);
+        jump->setShortcut(QKeySequence(QStringLiteral("Ctrl+%1").arg(i)));
+        connect(jump, &QAction::triggered, this, [this, i] {
+            const int target = (i == 9) ? m_tabs->count() - 1 : i - 1;
+            if (target >= 0 && target < m_tabs->count())
+                m_tabs->setCurrentIndex(target);
+        });
+        addAction(jump);
+    }
     connect(ui->actionNextTab, &QAction::triggered, this, [this] {
         if (m_tabs->count() > 1)
             m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % m_tabs->count());
@@ -1018,7 +1109,14 @@ bool MainWindow::saveFileAs()
         suggested = usableDir(QString()) + QLatin1Char('/') + QFileInfo(suggested).fileName();
     if (suggested.isEmpty()) {
         const QString lastDir = usableDir(settings.value(QStringLiteral("io/lastDir")).toString());
-        suggested = lastDir + QLatin1Char('/') + QStringLiteral("Untitled.note");
+        // A name given by renaming the tab becomes the suggestion here, so
+        // naming a scratch document up front actually pays off at save time.
+        QString base = m_doc->displayName();
+        if (base == tr("Untitled"))
+            base = QStringLiteral("Untitled.note");
+        else if (QFileInfo(base).suffix().isEmpty())
+            base += QStringLiteral(".note");
+        suggested = lastDir + QLatin1Char('/') + base;
     }
     QString fn = QFileDialog::getSaveFileName(
         this, tr("Save As"), suggested,
