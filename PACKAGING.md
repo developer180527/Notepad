@@ -96,3 +96,64 @@ user action) — set it per OS:
   xdg-mime default notepad.desktop text/markdown
   xdg-mime default notepad.desktop text/html
   ```
+
+---
+
+# Signing & notarizing the macOS DMG
+
+The release workflow always produces `Notepad-macos.dmg`. Whether that DMG opens
+cleanly on someone else's Mac depends on which credentials are configured:
+
+| Configured | Result |
+| --- | --- |
+| nothing | Ad-hoc signature. Works locally; other Macs show *"can't be opened because Apple cannot check it for malicious software"* and need a right-click → Open. |
+| Developer ID secrets | Signed with your certificate and hardened runtime. Gatekeeper still warns until the app is notarized. |
+| + notarization secrets | Signed, notarized and stapled. Opens with no warning, and works offline. |
+
+## What you need from Apple
+
+Notarization requires a **paid Apple Developer Program membership** — a free
+account can only issue "Apple Development" certificates, which are for running
+on your own machines and are rejected when distributed.
+
+1. Join the Apple Developer Program.
+2. In *Certificates, Identifiers & Profiles*, create a **Developer ID
+   Application** certificate and download it.
+3. Open it in Keychain Access, right-click → **Export** as a `.p12` with a
+   password.
+4. Create an **app-specific password** at <https://appleid.apple.com> →
+   *Sign-In and Security* → *App-Specific Passwords* (your normal Apple ID
+   password will not work for notarization).
+
+## Repository secrets
+
+Add these under *Settings → Secrets and variables → Actions*. Every one is
+optional; the workflow degrades to the row above if any are missing.
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERT_P12` | The `.p12`, base64-encoded: `base64 -i cert.p12 \| pbcopy` |
+| `MACOS_CERT_PASSWORD` | The password you set when exporting the `.p12` |
+| `MACOS_SIGN_IDENTITY` | Exact identity name, e.g. `Developer ID Application: Your Name (ABCDE12345)` — check with `security find-identity -v -p codesigning` |
+| `MACOS_TEAM_ID` | Your 10-character team id (the part in parentheses above) |
+| `MACOS_NOTARY_APPLE_ID` | The Apple ID that owns the membership |
+| `MACOS_NOTARY_PASSWORD` | The app-specific password from step 4 |
+
+The certificate is imported into a temporary keychain that is deleted when the
+job finishes, so it never persists on the runner.
+
+## Why the Qt frameworks are re-signed
+
+Hardened runtime (required for notarization) enables library validation, which
+refuses to load nested code signed by a different team. `macdeployqt` copies in
+Qt frameworks carrying whoever built them as their signer, so the workflow
+re-signs every framework, dylib and app extension with *your* identity before
+signing the app itself — inside-out, so each signature covers finished contents.
+
+## Verifying a release DMG
+
+```sh
+codesign -dv --verbose=2 /Volumes/Notepad/Notepad.app   # identity + team id
+xcrun stapler validate Notepad-macos.dmg                # notarization ticket
+spctl --assess --type open --context context:primary-signature -vv Notepad-macos.dmg
+```

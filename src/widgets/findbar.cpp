@@ -1,4 +1,4 @@
-#include "findbar.h"
+#include "widgets/findbar.h"
 
 #include <QCheckBox>
 #include <QHBoxLayout>

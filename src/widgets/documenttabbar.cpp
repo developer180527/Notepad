@@ -1,4 +1,4 @@
-#include "documenttabbar.h"
+#include "widgets/documenttabbar.h"
 
 #include <QApplication>
 #include <QDragEnterEvent>

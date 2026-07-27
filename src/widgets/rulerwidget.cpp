@@ -1,7 +1,7 @@
-#include "rulerwidget.h"
+#include "widgets/rulerwidget.h"
 
-#include "canvasview.h"
-#include "pagedocumentitem.h"
+#include "widgets/canvasview.h"
+#include "document/pagedocumentitem.h"
 
 #include <QFont>
 #include <QLineF>

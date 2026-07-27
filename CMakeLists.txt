@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.19)
-project(Notepad VERSION 2.2.0 LANGUAGES CXX)
+project(Notepad VERSION 3.0.0 LANGUAGES CXX)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport Network LinguistTools)
 
@@ -9,38 +9,59 @@ qt_standard_project_setup()
 # stay at the repo root, so all paths below are root-relative.
 qt_add_executable(Notepad
     WIN32 MACOSX_BUNDLE
-    src/main.cpp
-    src/mainwindow.cpp
-    src/mainwindow.h
-    src/mainwindow.ui
-    src/pagedocumentitem.cpp
-    src/pagedocumentitem.h
-    src/iconfactory.h
-    src/codehighlighter.cpp
-    src/documentview.cpp
-    src/documenttabbar.cpp
-    src/singleinstance.cpp
-    src/singleinstance.h
-    src/documenttabbar.h
-    src/documentview.h
-    src/fontcombo.cpp
-    src/fontcombo.h
-    src/codehighlighter.h
-    src/canvasview.cpp
-    src/canvasview.h
-    src/findbar.cpp
-    src/findbar.h
-    src/pagesetupdialog.cpp
-    src/pagesetupdialog.h
-    src/rulerwidget.cpp
-    src/rulerwidget.h
-    src/fontlibrary.cpp
-    src/fontlibrary.h
-    src/winregister.cpp
-    src/winregister.h
+
+    # app/     — process entry point and OS-level integration
+    src/app/main.cpp
+    src/app/singleinstance.cpp
+    src/app/singleinstance.h
+    src/app/winregister.cpp
+    src/app/winregister.h
+
+    # window/  — the main window: chrome, tabs, and the commands it exposes.
+    #            One class split across files by responsibility.
+    src/window/mainwindow.h
+    src/window/mainwindow.ui
+    src/window/mainwindow.cpp
+    src/window/mainwindow_actions.cpp
+    src/window/mainwindow_documents.cpp
+    src/window/mainwindow_fileops.cpp
+    src/window/mainwindow_format.cpp
+    src/window/mainwindow_view.cpp
+
+    # document/ — an open document: its model, paginated rendering and file I/O
+    src/document/documentview.h
+    src/document/documentview.cpp
+    src/document/pagedocumentitem.h
+    src/document/pagedocumentitem.cpp
+    src/document/pagedocumentitem_edit.cpp
+    src/document/pagedocumentitem_find.cpp
+    src/document/pagedocumentitem_images.cpp
+    src/document/pagedocumentitem_input.cpp
+    src/document/codehighlighter.h
+    src/document/codehighlighter.cpp
+
+    # widgets/  — reusable UI pieces with no document knowledge
+    src/widgets/canvasview.h
+    src/widgets/canvasview.cpp
+    src/widgets/documenttabbar.h
+    src/widgets/documenttabbar.cpp
+    src/widgets/findbar.h
+    src/widgets/findbar.cpp
+    src/widgets/fontcombo.h
+    src/widgets/fontcombo.cpp
+    src/widgets/iconfactory.h
+    src/widgets/pagesetupdialog.h
+    src/widgets/pagesetupdialog.cpp
+    src/widgets/rulerwidget.h
+    src/widgets/rulerwidget.cpp
+
+    # util/     — leaf helpers
+    src/util/fontlibrary.h
+    src/util/fontlibrary.cpp
 )
 
-# So headers resolve as "mainwindow.h" regardless of which dir a source is in.
+# Includes are written directory-qualified ("document/documentview.h"), so only
+# src/ itself needs to be on the include path.
 target_include_directories(Notepad PRIVATE src)
 
 # Embed the bundled portable fonts as :/fonts/*.ttf (AUTORCC is not enabled by
@@ -167,6 +188,12 @@ endif()
 # files. The app already opens a .note from argv (double-click via the desktop
 # entry). Run update-mime-database / update-desktop-database after install.
 if(UNIX AND NOT APPLE)
+    # DBus lets "Show in Folder" select the file in the user's file manager.
+    find_package(Qt6 COMPONENTS DBus QUIET)
+    if(Qt6DBus_FOUND)
+        target_link_libraries(Notepad PRIVATE Qt::DBus)
+    endif()
+
     add_executable(note-thumbnailer linux/note-thumbnailer.cpp)
     target_link_libraries(note-thumbnailer PRIVATE Qt::Gui)
     install(TARGETS note-thumbnailer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

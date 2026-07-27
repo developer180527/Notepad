@@ -1,4 +1,4 @@
-#include "fontcombo.h"
+#include "widgets/fontcombo.h"
 
 #include <QFontDatabase>
 

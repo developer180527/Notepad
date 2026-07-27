@@ -1,4 +1,4 @@
-#include "fontlibrary.h"
+#include "util/fontlibrary.h"
 
 #include <QFile>
 #include <QFontDatabase>

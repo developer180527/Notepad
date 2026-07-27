@@ -1,10 +1,10 @@
-#include "documentview.h"
+#include "document/documentview.h"
 
-#include "canvasview.h"
-#include "codehighlighter.h"
-#include "fontlibrary.h"
-#include "pagedocumentitem.h"
-#include "rulerwidget.h"
+#include "widgets/canvasview.h"
+#include "document/codehighlighter.h"
+#include "util/fontlibrary.h"
+#include "document/pagedocumentitem.h"
+#include "widgets/rulerwidget.h"
 
 #include <QBuffer>
 #include <QFile>

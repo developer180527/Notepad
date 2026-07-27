@@ -1,4 +1,4 @@
-#include "pagesetupdialog.h"
+#include "widgets/pagesetupdialog.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>

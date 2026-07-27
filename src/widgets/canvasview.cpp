@@ -1,4 +1,4 @@
-#include "canvasview.h"
+#include "widgets/canvasview.h"
 
 #include <QMouseEvent>
 #include <QNativeGestureEvent>

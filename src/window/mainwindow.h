@@ -160,8 +160,6 @@ private:
     QColor m_lastTextColor;
     QColor m_lastHighlightColor;
     bool m_updatingControls = false;
-
-    static constexpr int kA4WidthPx = 794;     // 210mm @ 96dpi, matches PageDocumentItem
 };
 
 #endif // MAINWINDOW_H

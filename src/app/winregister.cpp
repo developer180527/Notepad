@@ -1,4 +1,4 @@
-#include "winregister.h"
+#include "app/winregister.h"
 
 #include <QtGlobal>
 

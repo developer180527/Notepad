@@ -4,8 +4,8 @@ name: Release
 # artifacts to a GitHub Release. Triggered by pushing a tag like `v1.0.0`,
 # or run manually (workflow_dispatch) to just produce build artifacts.
 #
-# NOTE: authored on macOS and not run on CI yet — CI workflows usually need a
-# tweak or two on the first run (Qt module names, deploy flags, etc.).
+# macOS ships a DMG, code-signed and notarized when the Developer ID secrets are
+# configured (see the macos job for the list); ad-hoc signed otherwise.
 
 on:
   push:
@@ -19,6 +19,20 @@ env:
 
 jobs:
   # ----------------------------------------------------------------- macOS
+  #
+  # Produces a DMG. When the Developer ID secrets are present the app is signed
+  # with a Developer ID Application certificate, hardened-runtime enabled, and
+  # notarized + stapled, so Gatekeeper opens it without warnings. Without the
+  # secrets the same DMG is built with an ad-hoc signature: fine for local use,
+  # but macOS will warn on other machines.
+  #
+  # Required repository secrets (all optional; signing is skipped if unset):
+  #   MACOS_CERT_P12         base64 of the Developer ID Application .p12
+  #   MACOS_CERT_PASSWORD    password used when exporting that .p12
+  #   MACOS_SIGN_IDENTITY    e.g. "Developer ID Application: Name (TEAMID)"
+  #   MACOS_TEAM_ID          10-character Apple team id
+  #   MACOS_NOTARY_APPLE_ID  Apple ID used for notarization
+  #   MACOS_NOTARY_PASSWORD  app-specific password for that Apple ID
   macos:
     runs-on: macos-latest
     steps:
@@ -30,30 +44,152 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION_MACOS }}
+          version: ${{ env.QT_VERSION }}
           cache: true
 
-      - name: Configure & build
-        # Ad-hoc signing (`-`): a real signed/notarized release needs an Apple
-        # Developer ID via secrets; ad-hoc lets the build succeed in CI.
+      # The certificate lives in a throwaway keychain that is deleted at the end
+      # of the job, so it never persists on the runner.
+      - name: Import Developer ID certificate
+        id: signing
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNOTEPAD_SIGN_IDENTITY=-
+          if [ -z "$CERT_P12" ] || [ -z "$SIGN_IDENTITY" ]; then
+            echo "No Developer ID secrets set — falling back to ad-hoc signing."
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          # Let codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "identity=$SIGN_IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Configure & build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DNOTEPAD_SIGN_IDENTITY="${{ steps.signing.outputs.identity }}"
           cmake --build build
 
-      - name: Deploy Qt & package
+      - name: Deploy Qt
+        run: macdeployqt build/Notepad.app -verbose=1
+
+      # Everything must be signed inside-out, and the bundled Qt frameworks need
+      # OUR identity too: with hardened runtime enabled, library validation
+      # refuses to load nested code signed by a different team.
+      - name: Sign bundle
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
         run: |
-          macdeployqt build/Notepad.app -verbose=1
-          # macdeployqt adds the Qt frameworks AFTER the build's ad-hoc signing,
-          # invalidating the signature — re-sign the whole bundle or arm64 macOS
-          # SIGKILLs it on launch ("Code Signature Invalid").
-          codesign --force --deep --sign - build/Notepad.app
-          codesign --verify --deep --strict build/Notepad.app
-          ditto -c -k --keepParent build/Notepad.app Notepad-macos.zip
+          set -euo pipefail
+          APP=build/Notepad.app
+          if [ "$SIGNED" = "true" ]; then
+            OPTS=(--force --timestamp --options runtime --sign "$IDENTITY")
+          else
+            OPTS=(--force --sign -)
+          fi
+
+          # Sign every match of a pattern, tolerating a directory that does not
+          # exist: piping a failing `find` would abort the step under pipefail.
+          sign_tree() {
+            local dir="$1" pattern="$2" type="$3"
+            [ -d "$dir" ] || return 0
+            while IFS= read -r -d '' f; do
+              codesign "${OPTS[@]}" "$f"
+            done < <(find "$dir" -name "$pattern" -type "$type" -print0)
+          }
+
+          # Nested code first, so each signature covers already-signed contents.
+          sign_tree "$APP/Contents/Frameworks" "*.dylib" f
+          sign_tree "$APP/Contents/Frameworks" "*.framework" d
+          sign_tree "$APP/Contents/PlugIns" "*.dylib" f
+
+          # Then the Quick Look app extensions, with their entitlements.
+          for ext in Thumbnail Preview; do
+            APPEX="$APP/Contents/PlugIns/Notepad$ext.appex"
+            [ -d "$APPEX" ] || continue
+            if [ "$SIGNED" = "true" ]; then
+              codesign --force --timestamp --options runtime \
+                --entitlements "mac/${ext}Extension/${ext}.entitlements" \
+                --sign "$IDENTITY" "$APPEX"
+            else
+              codesign --force --sign - "$APPEX"
+            fi
+          done
+
+          # The app last, so its signature covers the finished bundle.
+          codesign "${OPTS[@]}" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Build DMG
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGE"
+          cp -R build/Notepad.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"     # drag-to-install target
+          hdiutil create -volname "Notepad" -srcfolder "$STAGE" -ov \
+            -format UDZO -fs HFS+ Notepad-macos.dmg
+          hdiutil verify Notepad-macos.dmg
+
+      - name: Sign, notarize & staple DMG
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          codesign --force --timestamp --sign "$IDENTITY" Notepad-macos.dmg
+          if [ -z "$APPLE_ID" ] || [ -z "$NOTARY_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+            echo "::warning::Signed but NOT notarized — set MACOS_NOTARY_APPLE_ID," \
+                 "MACOS_NOTARY_PASSWORD and MACOS_TEAM_ID to enable notarization."
+            exit 0
+          fi
+          # --wait blocks until Apple returns a verdict (usually a few minutes).
+          xcrun notarytool submit Notepad-macos.dmg \
+            --apple-id "$APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$TEAM_ID" \
+            --wait --timeout 30m
+          # Stapling attaches the ticket so Gatekeeper passes it offline too.
+          xcrun stapler staple Notepad-macos.dmg
+          xcrun stapler validate Notepad-macos.dmg
+          spctl --assess --type open --context context:primary-signature -vv Notepad-macos.dmg
+
+      - name: Report signing status
+        run: |
+          echo "### macOS package" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            echo "Signed with a Developer ID certificate." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Ad-hoc signed (no Developer ID secrets configured). macOS will" \
+                 "warn users on first launch." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          codesign -dv --verbose=2 build/Notepad.app 2>&1 | sed 's/^/    /' \
+            >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: Notepad-macos
-          path: Notepad-macos.zip
+          path: Notepad-macos.dmg
 
   # ----------------------------------------------------------------- Windows
   windows:

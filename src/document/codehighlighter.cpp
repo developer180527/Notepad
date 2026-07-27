@@ -1,4 +1,4 @@
-#include "codehighlighter.h"
+#include "document/codehighlighter.h"
 
 #include <QTextDocument>
 

@@ -1,4 +1,4 @@
-#include "singleinstance.h"
+#include "app/singleinstance.h"
 
 #include <QDataStream>
 #include <QLocalServer>

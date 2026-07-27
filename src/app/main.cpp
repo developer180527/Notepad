@@ -1,6 +1,6 @@
-#include "mainwindow.h"
-#include "singleinstance.h"
-#include "winregister.h"
+#include "window/mainwindow.h"
+#include "app/singleinstance.h"
+#include "app/winregister.h"
 
 #include <QApplication>
 #include <QFileOpenEvent>
