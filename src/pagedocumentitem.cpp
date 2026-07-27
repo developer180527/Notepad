@@ -127,6 +127,7 @@ void PageDocumentItem::setPageLayoutMetrics(const QSizeF &sheetPx, const QMargin
     m_margins = marginsPx;
     m_gap = gapPx;
     m_doc->setPageSize(QSizeF(textW(), textH()));   // only when the layout changes
+    fitContentToPageWidth();      // a narrower page may now be too small for an image
     recomputePages();
     emit ensureVisibleRequested(caretSceneRect());
 }
@@ -522,8 +523,71 @@ void PageDocumentItem::clearImageSelection()
     }
 }
 
+// Keep every block and inline image within the page's text column.
+//
+// A fixed-size sheet cannot scroll sideways, so anything wider than the column
+// is simply invisible: preformatted blocks (markdown ``` fences, html <pre>)
+// carry nonBreakableLines so their lines never wrap, and images keep whatever
+// absolute width they were given when inserted — after a page-size change that
+// can be wider than the new page. Both spill past the right margin and are
+// clipped away by the per-page clip in paint(). Word processors reflow such
+// content to fit, which is what we do here.
+void PageDocumentItem::fitContentToPageWidth()
+{
+    const qreal maxW = textW();
+    if (maxW <= 0)
+        return;
+
+    // Collect first, edit after: changing a block or fragment format while
+    // iterating invalidates the iterators.
+    QList<int> unwrapBlocks;
+    QList<QPair<QPair<int, int>, QTextImageFormat>> shrinkImages;
+
+    for (QTextBlock b = m_doc->begin(); b.isValid(); b = b.next()) {
+        if (b.blockFormat().nonBreakableLines())
+            unwrapBlocks.append(b.position());
+        for (auto it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment frag = it.fragment();
+            if (!frag.isValid())
+                continue;
+            const QTextCharFormat cf = frag.charFormat();
+            if (!cf.isImageFormat())
+                continue;
+            QTextImageFormat img = cf.toImageFormat();
+            if (img.width() <= maxW || img.width() <= 0)
+                continue;
+            const qreal scale = maxW / img.width();
+            if (img.height() > 0)
+                img.setHeight(img.height() * scale);   // preserve aspect
+            img.setWidth(maxW);
+            shrinkImages.append({{frag.position(), frag.length()}, img});
+        }
+    }
+    if (unwrapBlocks.isEmpty() && shrinkImages.isEmpty())
+        return;
+
+    // Reflowing is a repair, not an edit: keep the document's modified state.
+    const bool wasModified = m_doc->isModified();
+    QTextCursor c(m_doc);
+    c.beginEditBlock();
+    for (int pos : std::as_const(unwrapBlocks)) {
+        c.setPosition(pos);
+        QTextBlockFormat bf = c.blockFormat();
+        bf.setNonBreakableLines(false);
+        c.setBlockFormat(bf);
+    }
+    for (const auto &entry : std::as_const(shrinkImages)) {
+        c.setPosition(entry.first.first);
+        c.setPosition(entry.first.first + entry.first.second, QTextCursor::KeepAnchor);
+        c.setCharFormat(entry.second);
+    }
+    c.endEditBlock();
+    m_doc->setModified(wasModified);
+}
+
 void PageDocumentItem::documentReset()
 {
+    fitContentToPageWidth();
     // Loading a file (setPlainText/setHtml/setMarkdown) and the font/margin
     // setup around it are undoable operations — but undoing *past* a file load
     // is never what the user wants, so the freshly loaded state is the baseline.
@@ -582,10 +646,12 @@ void PageDocumentItem::paste()
             return;
         }
     }
-    if (mime->hasHtml())
+    if (mime->hasHtml()) {
         m_cursor.insertHtml(mime->html());
-    else if (mime->hasText())
+        fitContentToPageWidth();   // pasted <pre>/wide images must still fit
+    } else if (mime->hasText()) {
         m_cursor.insertText(mime->text(), m_typingFormat);
+    }
     afterCursorMoved();
 }
 

@@ -22,6 +22,8 @@
     <addaction name="actionSave"/>
     <addaction name="actionSaveAs"/>
     <addaction name="separator"/>
+    <addaction name="actionShowInFolder"/>
+    <addaction name="separator"/>
     <addaction name="actionCloseTab"/>
     <addaction name="separator"/>
     <addaction name="actionPageSetup"/>
@@ -104,6 +106,10 @@
   <action name="actionSaveAs">
    <property name="text"><string>Save &amp;As...</string></property>
    <property name="shortcut"><string>Ctrl+Shift+S</string></property>
+  </action>
+  <action name="actionShowInFolder">
+   <property name="text"><string>Show in &amp;Folder</string></property>
+   <property name="toolTip"><string>Reveal this document in the system file manager</string></property>
   </action>
   <action name="actionCloseTab">
    <property name="text"><string>&amp;Close Tab</string></property>

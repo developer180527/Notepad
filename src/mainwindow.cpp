@@ -57,7 +57,9 @@
 #include <QSet>
 #include <QSlider>
 #include <QSpinBox>
+#include <QDesktopServices>
 #include <QDrag>
+#include <QProcess>
 #include <QMimeData>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -192,6 +194,7 @@ void MainWindow::setupWorkspace()
                     setWindowTitle(tr("%1[*] %2 Notepad")
                                        .arg(doc->displayName(), QString(QChar(0x2014))));
                     setWindowFilePath(doc->filePath());
+                    updateShowInFolderState();
                 }
             });
 
@@ -203,6 +206,8 @@ void MainWindow::setupWorkspace()
             return;
         QMenu menu;
         QAction *rename = menu.addAction(tr("Rename..."));
+        QAction *reveal = menu.addAction(tr("Show in Folder"));
+        reveal->setEnabled(documentAt(index) && !documentAt(index)->filePath().isEmpty());
         QAction *detach = menu.addAction(tr("Move to New Window"));
         detach->setEnabled(m_stack->count() > 1);
         menu.addSeparator();
@@ -215,6 +220,8 @@ void MainWindow::setupWorkspace()
         QAction *chosen = menu.exec(m_tabs->mapToGlobal(pos));
         if (chosen == rename) {
             m_tabs->beginRename(index);
+        } else if (chosen == reveal) {
+            showInFolder(documentAt(index));
         } else if (chosen == detach) {
             if (DocumentView *doc = documentAt(index))
                 detachToNewWindow(doc, QCursor::pos());
@@ -456,6 +463,9 @@ void MainWindow::startTabDrag(int index)
     // is what makes tear-off feel laggy. It stays hidden (and is discarded) if
     // the drop turns out to be a merge.
     MainWindow *pending = createWindowForAdoption();
+    // A torn-off tab should feel like it kept its window: same size as the one
+    // it came from, not the saved default geometry.
+    pending->resize(size());
 
     drag.exec(Qt::MoveAction);
 
@@ -480,10 +490,12 @@ void MainWindow::detachToNewWindow(DocumentView *doc, const QPoint &globalPos)
         return;
 
     MainWindow *w = createWindowForAdoption();
+    w->resize(size());             // inherit this window's size, not the default
     takeDocument(index);           // safe: guarded above, so we never self-close
-    w->adoptDocument(doc);
-    // Place the new window near the cursor, offset so the title bar is grabbable.
+    // Place before adopting: adoptDocument() shows the window, so moving
+    // afterwards would make it appear at one position and jump to another.
     w->move(globalPos - QPoint(80, 20));
+    w->adoptDocument(doc);
     w->show();
     w->raise();
     w->activateWindow();
@@ -614,6 +626,7 @@ void MainWindow::syncChromeToDocument()
 
     setWindowModified(m_doc->isModified());
     updateMarkdownActionState();
+    updateShowInFolderState();
     updateWordCount();
     updatePageLabel();
     syncFormatControls();
@@ -744,6 +757,8 @@ void MainWindow::connectActions()
     connect(ui->actionSaveAs, &QAction::triggered, this, &MainWindow::saveFileAs);
     connect(ui->actionExportPdf, &QAction::triggered, this, &MainWindow::exportPdf);
     connect(ui->actionPrint, &QAction::triggered, this, &MainWindow::printDocument);
+    connect(ui->actionShowInFolder, &QAction::triggered, this,
+            [this] { showInFolder(m_doc); });
     connect(ui->actionQuit, &QAction::triggered, this, &QWidget::close);
     connect(ui->actionCloseTab, &QAction::triggered, this,
             [this] { closeDocumentAt(m_tabs->currentIndex()); });
@@ -1258,6 +1273,55 @@ void MainWindow::exportPdf()
     delete doc;
 
     statusBar()->showMessage(tr("Exported %1").arg(QFileInfo(fn).fileName()), 2500);
+}
+
+// Reveal a document in the system file manager. Each platform has its own way
+// to *select* the file rather than just opening its folder, which is what the
+// user actually wants; the plain-folder open is the last-resort fallback.
+void MainWindow::showInFolder(DocumentView *doc)
+{
+    if (!doc)
+        return;
+    const QString path = doc->filePath();
+    if (path.isEmpty()) {
+        statusBar()->showMessage(tr("Save the document first — it has no file yet."), 3000);
+        return;
+    }
+    const QFileInfo info(path);
+    if (!info.exists()) {
+        QMessageBox::warning(this, tr("Notepad"),
+                             tr("\"%1\" is no longer on disk — it may have been moved, "
+                                "renamed or deleted.").arg(info.fileName()));
+        return;
+    }
+
+    const QString absolute = info.absoluteFilePath();
+#if defined(Q_OS_MACOS)
+    QProcess::startDetached(QStringLiteral("open"), {QStringLiteral("-R"), absolute});
+#elif defined(Q_OS_WIN)
+    // Explorer wants back-slashes, and /select, must be one comma-joined argument.
+    QProcess::startDetached(QStringLiteral("explorer.exe"),
+                            {QStringLiteral("/select,") + QDir::toNativeSeparators(absolute)});
+#else
+    // The freedesktop DBus call selects the file in whichever manager is
+    // installed; fall back to just opening the containing directory.
+    const bool selected = QProcess::startDetached(
+        QStringLiteral("dbus-send"),
+        {QStringLiteral("--session"), QStringLiteral("--print-reply"),
+         QStringLiteral("--dest=org.freedesktop.FileManager1"),
+         QStringLiteral("--type=method_call"),
+         QStringLiteral("/org/freedesktop/FileManager1"),
+         QStringLiteral("org.freedesktop.FileManager1.ShowItems"),
+         QStringLiteral("array:string:") + QUrl::fromLocalFile(absolute).toString(),
+         QStringLiteral("string:")});
+    if (!selected)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath()));
+#endif
+}
+
+void MainWindow::updateShowInFolderState()
+{
+    ui->actionShowInFolder->setEnabled(m_doc && !m_doc->filePath().isEmpty());
 }
 
 void MainWindow::printDocument()

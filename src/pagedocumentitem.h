@@ -55,6 +55,8 @@ public:
     void insertImage(const QImage &image);
     void insertTable(int rows, int columns);
     void documentReset();          // call after loading new content into document()
+    // Reflow anything wider than the text column back inside the page.
+    void fitContentToPageWidth();
 
     // Render page 1 (white sheet + first-page text) to an image, for the .note
     // thumbnail/Quick Look preview. maxWidthPx is the output width.

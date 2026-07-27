@@ -101,6 +101,8 @@ private:
     bool saveFileAs();
     void exportPdf();
     void printDocument();
+    void showInFolder(DocumentView *doc);   // reveal in Finder/Explorer/file manager
+    void updateShowInFolderState();
     bool maybeSave();
     bool writeToFile(const QString &path);
     bool loadDocument(const QString &path);
