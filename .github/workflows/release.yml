@@ -44,7 +44,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ env.QT_VERSION }}
+          version: ${{ env.QT_VERSION_MACOS }}
           cache: true
 
       # The certificate lives in a throwaway keychain that is deleted at the end
