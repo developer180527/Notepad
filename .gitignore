@@ -89,3 +89,11 @@ CMakeLists.txt.user*
 docs/Doxygen/html
 docs/Doxygen/xml
 docs/Doxygen/latex/
+
+# macOS Finder custom-folder-icon marker. Its real name is "Icon" followed by
+# a carriage return, which Windows cannot create — committing it breaks the
+# Windows CI checkout with: error: invalid path 'Icon?'
+Icon
+._*
+.AppleDouble
+.LSOverride
