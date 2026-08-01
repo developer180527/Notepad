@@ -1,5 +1,7 @@
 #include "document/pagedocumentitem.h"
 
+#include "util/theme.h"
+
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QClipboard>
@@ -146,8 +148,9 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
     first = qBound(0, first, m_pageCount - 1);
     last = qBound(0, last, m_pageCount - 1);
 
+    const Theme &theme = Theme::instance();
     QPalette pal;
-    pal.setColor(QPalette::Text, Qt::black);
+    pal.setColor(QPalette::Text, theme.pageTextColor());
     const QColor highlight = QApplication::palette().color(QPalette::Highlight);
     const QColor highlightText = QApplication::palette().color(QPalette::HighlightedText);
 
@@ -167,8 +170,8 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
             painter->setBrush(QColor(0, 0, 0, 8));
             painter->drawRoundedRect(sheet.adjusted(-i + 3, -i + 4, i + 3, i + 5), 2, 2);
         }
-        painter->setBrush(Qt::white);
-        painter->setPen(QPen(QColor(208, 208, 208), 1));
+        painter->setBrush(theme.pageColor());
+        painter->setPen(QPen(theme.pageBorderColor(), 1));
         painter->drawRect(sheet);
 
         // Draw this page's slice of the document into its text rect.

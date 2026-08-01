@@ -100,6 +100,7 @@ private:
     bool saveFile();
     bool saveFileAs();
     void exportPdf();
+    void convertDocument();      // save a copy in another format
     void printDocument();
     void showInFolder(DocumentView *doc);   // reveal in Finder/Explorer/file manager
     void updateShowInFolderState();

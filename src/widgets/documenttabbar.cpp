@@ -23,7 +23,11 @@ DocumentTabBar::DocumentTabBar(QWidget *parent)
     setFocusPolicy(Qt::NoFocus);
     setAcceptDrops(true);      // tabs dragged from another window can land here
     setStyleSheet(QStringLiteral(
-        "QTabBar::tab { padding: 4px 10px; margin-right: 2px; max-width: 220px;"
+        // A minimum width is what makes the strip *scroll* rather than squeeze:
+        // without it Qt shrinks tabs to fit and the labels elide to "d…e", which
+        // tells the user nothing. Below this width the bar scrolls instead.
+        "QTabBar::tab { padding: 4px 10px; margin-right: 2px;"
+        " min-width: 104px; max-width: 220px;"
         " border-top-left-radius: 0px; border-top-right-radius: 0px;"
         " border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }"
         "QTabBar::tab:selected { background: rgba(128,128,128,0.30); }"

@@ -7,6 +7,7 @@
 #include "ui_mainwindow.h"
 #include "widgets/canvasview.h"
 #include "document/documentview.h"
+#include "document/documentexport.h"
 #include "widgets/documenttabbar.h"
 #include "document/codehighlighter.h"
 #include "widgets/findbar.h"
@@ -51,6 +52,7 @@
 #include <QPdfWriter>
 #include <QPrintDialog>
 #include <QPrinter>
+#include <QPushButton>
 #include <QPropertyAnimation>
 #include <QSettings>
 #include <QStandardPaths>
@@ -96,19 +98,23 @@ void MainWindow::newFile()
 
 void MainWindow::openFile()
 {
-    if (!maybeSave())
-        return;
     QSettings settings;
     const QString lastDir = usableDir(settings.value(QStringLiteral("io/lastDir")).toString());
-    const QString fn = QFileDialog::getOpenFileName(
+    // Multi-select: each chosen file becomes its own tab, so a whole folder of
+    // notes can be opened in one go. Opening never disturbs what is already
+    // on screen, so there is nothing to prompt about up front.
+    const QStringList files = QFileDialog::getOpenFileNames(
         this, tr("Open"), lastDir,
         tr("All Supported (*.note *.txt *.md *.markdown *.html *.htm *.json *.yaml *.yml);;"
            "Notepad Note (*.note);;Text (*.txt);;Markdown (*.md *.markdown);;"
            "HTML (*.html *.htm);;JSON (*.json);;YAML (*.yaml *.yml);;All Files (*)"));
-    if (fn.isEmpty())
+    if (files.isEmpty())
         return;
-    settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(fn).absolutePath());
-    openPath(fn);
+    settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(files.first()).absolutePath());
+    for (const QString &fn : files)
+        openPath(fn);
+    if (files.size() > 1)
+        statusBar()->showMessage(tr("Opened %n document(s)", nullptr, files.size()), 2500);
 }
 
 void MainWindow::openPath(const QString &path)
@@ -384,6 +390,108 @@ void MainWindow::showInFolder(DocumentView *doc)
 void MainWindow::updateShowInFolderState()
 {
     ui->actionShowInFolder->setEnabled(m_doc && !m_doc->filePath().isEmpty());
+}
+
+// Save a copy of the document in another format. Deliberately separate from
+// Save As: converting must not rebind the open document to the new file, or a
+// later Ctrl+S would silently overwrite a .txt copy with the whole document.
+void MainWindow::convertDocument()
+{
+    if (!m_doc)
+        return;
+
+    const QList<DocumentExport::FormatInfo> formats = DocumentExport::formats();
+    QStringList labels;
+    for (const DocumentExport::FormatInfo &f : formats) {
+        labels << (f.lossless
+                       ? tr("%1 (keeps all formatting)").arg(tr(f.label))
+                       : tr("%1").arg(tr(f.label)));
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Convert / Export As"));
+    auto *combo = new QComboBox(&dialog);
+    combo->addItems(labels);
+    auto *note = new QLabel(&dialog);
+    note->setWordWrap(true);
+    note->setMinimumWidth(360);
+
+    auto describe = [&](int index) {
+        if (index < 0 || index >= formats.size())
+            return;
+        const DocumentExport::FormatInfo &f = formats.at(index);
+        switch (f.format) {
+        case DocumentExport::Format::Note:
+            note->setText(tr("Everything is preserved: colours, fonts, sizes, tables and images.")); break;
+        case DocumentExport::Format::Html:
+            note->setText(tr("Rich HTML — keeps formatting and images.")); break;
+        case DocumentExport::Format::Markdown:
+            note->setText(tr("Keeps bold, italic, headings, lists and tables. "
+                             "Colours, fonts, sizes and images are dropped.")); break;
+        case DocumentExport::Format::PlainText:
+            note->setText(tr("Text only — all formatting, tables and images are dropped.")); break;
+        case DocumentExport::Format::Json:
+            note->setText(tr("A structured outline: headings, paragraphs, lists and "
+                             "tables as data. Styling is not included.")); break;
+        case DocumentExport::Format::Yaml:
+            note->setText(tr("The same structured outline as JSON, in YAML.")); break;
+        }
+    };
+    connect(combo, &QComboBox::currentIndexChanged, &dialog, describe);
+    describe(0);
+
+    auto *form = new QFormLayout;
+    form->addRow(tr("Format:"), combo);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Choose File..."));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addLayout(form);
+    layout->addWidget(note);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const DocumentExport::FormatInfo chosen = formats.at(combo->currentIndex());
+    const QString suffix = QString::fromLatin1(chosen.suffix);
+    QString base = m_doc->displayName();
+    if (base == tr("Untitled"))
+        base = QStringLiteral("Untitled");
+    else
+        base = QFileInfo(base).completeBaseName();
+
+    QSettings settings;
+    const QString dir = m_doc->filePath().isEmpty()
+                            ? usableDir(settings.value(QStringLiteral("io/lastDir")).toString())
+                            : QFileInfo(m_doc->filePath()).absolutePath();
+
+    QString fn = QFileDialog::getSaveFileName(
+        this, tr("Convert / Export As"),
+        dir + QLatin1Char('/') + base + QLatin1Char('.') + suffix,
+        tr("%1 (*.%2)").arg(tr(chosen.label), suffix));
+    if (fn.isEmpty())
+        return;
+    if (QFileInfo(fn).suffix().isEmpty())
+        fn += QLatin1Char('.') + suffix;
+
+    // Refuse to convert over the document's own file — that would replace a rich
+    // .note with, say, its plain-text rendering.
+    if (!m_doc->filePath().isEmpty()
+        && QFileInfo(fn).absoluteFilePath() == QFileInfo(m_doc->filePath()).absoluteFilePath()) {
+        QMessageBox::warning(this, tr("Convert / Export As"),
+                             tr("That is the document's own file. Choose a different "
+                                "name so the original is not replaced."));
+        return;
+    }
+
+    QString error;
+    if (!m_doc->exportTo(fn, &error)) {
+        QMessageBox::warning(this, tr("Notepad"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1").arg(QFileInfo(fn).fileName()), 3000);
 }
 
 void MainWindow::printDocument()

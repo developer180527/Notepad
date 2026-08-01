@@ -50,6 +50,7 @@ public:
     // --- file i/o (no dialogs; failures come back in *errorOut) ---
     bool load(const QString &path, QString *errorOut);
     bool save(const QString &path, QString *errorOut);
+    bool exportTo(const QString &path, QString *errorOut);   // converted copy
     bool hasRichFormatting() const;       // would txt/md lose anything?
 
     // --- fonts ---

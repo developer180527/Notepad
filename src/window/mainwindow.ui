@@ -29,6 +29,9 @@
     <addaction name="actionPageSetup"/>
     <addaction name="actionPrint"/>
     <addaction name="actionExportPdf"/>
+    <addaction name="actionConvert"/>
+    <addaction name="separator"/>
+    <addaction name="actionSettings"/>
     <addaction name="separator"/>
     <addaction name="actionQuit"/>
    </widget>
@@ -128,12 +131,22 @@
   <action name="actionExportPdf">
    <property name="text"><string>Export as &amp;PDF...</string></property>
   </action>
+  <action name="actionConvert">
+   <property name="text"><string>Con&amp;vert / Export As...</string></property>
+   <property name="shortcut"><string>Ctrl+Shift+E</string></property>
+   <property name="toolTip"><string>Save a copy of this document in another format</string></property>
+  </action>
   <action name="actionPageSetup">
    <property name="text"><string>Page Set&amp;up...</string></property>
   </action>
   <action name="actionFind">
    <property name="text"><string>&amp;Find / Replace...</string></property>
    <property name="shortcut"><string>Ctrl+F</string></property>
+  </action>
+  <action name="actionSettings">
+   <property name="text"><string>Se&amp;ttings...</string></property>
+   <property name="shortcut"><string>Ctrl+,</string></property>
+   <property name="menuRole"><enum>QAction::PreferencesRole</enum></property>
   </action>
   <action name="actionQuit">
    <property name="text"><string>&amp;Quit</string></property>

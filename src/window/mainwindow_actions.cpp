@@ -4,6 +4,7 @@
 // responsibility; see mainwindow.h for the class definition.
 
 #include "window/mainwindow.h"
+#include "widgets/settingsdialog.h"
 #include "ui_mainwindow.h"
 #include "widgets/canvasview.h"
 #include "document/documentview.h"
@@ -96,11 +97,15 @@ void MainWindow::connectActions()
     connect(ui->actionSave, &QAction::triggered, this, &MainWindow::saveFile);
     connect(ui->actionSaveAs, &QAction::triggered, this, &MainWindow::saveFileAs);
     connect(ui->actionExportPdf, &QAction::triggered, this, &MainWindow::exportPdf);
+    connect(ui->actionConvert, &QAction::triggered, this, &MainWindow::convertDocument);
     connect(ui->actionPrint, &QAction::triggered, this, &MainWindow::printDocument);
     connect(ui->actionShowInFolder, &QAction::triggered, this,
             [this] { showInFolder(m_doc); });
     connect(ui->actionShowInFolder, &QAction::triggered, this,
             [this] { showInFolder(m_doc); });
+    connect(ui->actionSettings, &QAction::triggered, this, [this] {
+        SettingsDialog(this).exec();
+    });
     connect(ui->actionQuit, &QAction::triggered, this, &QWidget::close);
     connect(ui->actionCloseTab, &QAction::triggered, this,
             [this] { closeDocumentAt(m_tabs->currentIndex()); });

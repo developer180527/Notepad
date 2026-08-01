@@ -6,6 +6,7 @@
 #include "widgets/documenttabbar.h"
 #include "document/codehighlighter.h"
 #include "widgets/findbar.h"
+#include "util/theme.h"
 #include "widgets/fontcombo.h"
 #include "util/fontlibrary.h"
 #include "widgets/iconfactory.h"
@@ -128,6 +129,18 @@ MainWindow::MainWindow(bool withInitialDocument, QWidget *parent)
 
     setupWorkspace();
     applyCanvasTheme();
+    // Theme is app-wide: every window follows it, including ones opened later.
+    connect(&Theme::instance(), &Theme::changed, this, [this] {
+        // QApplication::setPalette() does not reach top-level windows that
+        // already exist, so push the new palette down explicitly; it cascades
+        // to every child that has not set one of its own.
+        setPalette(QApplication::palette());
+        applyCanvasTheme();
+        refreshIcons();
+        for (int i = 0; i < m_stack->count(); ++i)
+            if (DocumentView *d = documentAt(i))
+                d->editor()->update();      // page colours changed
+    });
     setupToolBar();
     setupStatusBar();
     connectActions();
@@ -475,9 +488,7 @@ void MainWindow::refreshIcons()
 
 void MainWindow::applyCanvasTheme()
 {
-    const QColor base = palette().color(QPalette::Window);
-    const QColor canvasColor =
-        base.lightness() < 128 ? base.darker(118) : QColor(0xD6, 0xD6, 0xD6);
+    const QColor canvasColor = Theme::instance().canvasColor();
     if (!m_stack)
         return;                       // called once before any document exists
     for (int i = 0; i < m_stack->count(); ++i)

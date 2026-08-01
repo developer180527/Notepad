@@ -2,6 +2,7 @@
 
 #include "widgets/canvasview.h"
 #include "document/codehighlighter.h"
+#include "document/documentexport.h"
 #include "util/fontlibrary.h"
 #include "document/pagedocumentitem.h"
 #include "widgets/rulerwidget.h"
@@ -362,17 +363,36 @@ bool DocumentView::save(const QString &path, QString *errorOut)
             *errorOut = tr("Cannot write %1:\n%2").arg(path, file.errorString());
         return false;
     }
-    QByteArray out;
-    if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"))
-        out = m_editor->document()->toMarkdown().toUtf8();
-    else if (suffix == QLatin1String("html") || suffix == QLatin1String("htm"))
-        out = m_editor->document()->toHtml().toUtf8();
-    else
-        out = m_editor->document()->toPlainText().toUtf8();
-    file.write(out);
+    file.write(DocumentExport::serialise(m_editor->document(),
+                                         DocumentExport::formatForSuffix(suffix)));
     file.close();
 
     m_editor->document()->setModified(false);
+    return true;
+}
+
+// Write a converted copy. Unlike save() this never rebinds the document to the
+// new path and never clears the modified flag — the open document is unchanged,
+// the export is just a file that came out of it.
+bool DocumentView::exportTo(const QString &path, QString *errorOut)
+{
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (DocumentExport::formatForSuffix(suffix) == DocumentExport::Format::Note) {
+        const bool wasModified = isModified();
+        const bool ok = saveNote(path, errorOut);
+        m_editor->document()->setModified(wasModified);
+        return ok;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorOut)
+            *errorOut = tr("Cannot write %1:\n%2").arg(path, file.errorString());
+        return false;
+    }
+    file.write(DocumentExport::serialise(m_editor->document(),
+                                         DocumentExport::formatForSuffix(suffix)));
+    file.close();
     return true;
 }
 

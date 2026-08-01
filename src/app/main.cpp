@@ -1,5 +1,6 @@
 #include "window/mainwindow.h"
 #include "app/singleinstance.h"
+#include "util/theme.h"
 #include "app/winregister.h"
 
 #include <QApplication>
@@ -81,6 +82,10 @@ int main(int argc, char *argv[])
             }
         }
     });
+
+    // Restore the saved appearance before any window is built, so the first
+    // window is drawn in the right theme rather than repainting into it.
+    Theme::instance().load();
 
     // On Windows, ensure the .note association + thumbnail handler are registered
     // (per-user). No-op elsewhere.

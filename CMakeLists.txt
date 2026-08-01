@@ -38,6 +38,8 @@ qt_add_executable(Notepad
     src/document/pagedocumentitem_images.cpp
     src/document/pagedocumentitem_input.cpp
     src/document/codehighlighter.h
+    src/document/documentexport.h
+    src/document/documentexport.cpp
     src/document/codehighlighter.cpp
 
     # widgets/  — reusable UI pieces with no document knowledge
@@ -54,9 +56,13 @@ qt_add_executable(Notepad
     src/widgets/pagesetupdialog.cpp
     src/widgets/rulerwidget.h
     src/widgets/rulerwidget.cpp
+    src/widgets/settingsdialog.h
+    src/widgets/settingsdialog.cpp
 
     # util/     — leaf helpers
     src/util/fontlibrary.h
+    src/util/theme.h
+    src/util/theme.cpp
     src/util/fontlibrary.cpp
 )
 
