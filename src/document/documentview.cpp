@@ -521,9 +521,11 @@ bool DocumentView::loadNote(const QString &path, QString *errorOut)
         QString name;
         QByteArray bytes;
         in >> name >> bytes;
-        QImage img;
-        if (img.loadFromData(bytes))
-            m_editor->document()->addResource(QTextDocument::ImageResource, QUrl(name), img);
+        // Hand Qt the encoded bytes: it decodes them when the image is actually
+        // painted, so opening a note full of photos does not immediately
+        // materialise every one of them as a full-size bitmap.
+        if (!bytes.isEmpty())
+            m_editor->document()->addResource(QTextDocument::ImageResource, QUrl(name), bytes);
     }
 
     // v2+: register embedded fonts before laying out the html.

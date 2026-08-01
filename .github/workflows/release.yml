@@ -87,6 +87,48 @@ jobs:
       - name: Deploy Qt
         run: macdeployqt build/Notepad.app -verbose=1
 
+      # macdeployqt copies plugins it finds, not only the ones we can reach.
+      # The virtual-keyboard input plugin is the sole thing pulling in the whole
+      # QML stack (QtQuick + QtQml*), and we ship a Widgets app, so both go.
+      # The TLS and network-information plugins exist for QtNetwork, which we use
+      # only for a local socket. Measured locally: 91 MB -> 79 MB.
+      #
+      # OpenSSL deliberately stays: QtNetwork hard-links libssl/libcrypto, and
+      # removing them makes the app fail to start with a dyld error.
+      - name: Prune unused Qt components
+        run: |
+          set -eu
+          APP=build/Notepad.app
+          before=$(du -sm "$APP" | cut -f1)
+          rm -rf "$APP/Contents/PlugIns/platforminputcontexts"
+          rm -rf "$APP/Contents/Frameworks/QtQuick.framework"
+          rm -rf "$APP"/Contents/Frameworks/QtQml*.framework
+          rm -rf "$APP/Contents/PlugIns/tls"
+          rm -rf "$APP/Contents/PlugIns/networkinformation"
+          # Shipped broken by macdeployqt anyway: it references QtPdf, which is
+          # never copied, so the plugin can only fail to load.
+          rm -f "$APP"/Contents/PlugIns/imageformats/libqpdf.dylib
+          after=$(du -sm "$APP" | cut -f1)
+          echo "bundle: ${before}MB -> ${after}MB"
+
+          # Fail the build rather than ship a bundle with a broken link.
+          missing=0
+          while IFS= read -r bin; do
+            while IFS= read -r dep; do
+              case "$dep" in
+                @executable_path/*) path="$APP/Contents/MacOS/${dep#@executable_path/}" ;;
+                @rpath/*)           path="$APP/Contents/Frameworks/${dep#@rpath/}" ;;
+                *) continue ;;
+              esac
+              if [ ! -e "$path" ]; then
+                echo "::error::$bin still references missing $dep"
+                missing=1
+              fi
+            done <<< "$(otool -L "$bin" | tail -n +2 | awk '{print $1}')"
+          done <<< "$(find "$APP" -type f \( -name '*.dylib' -o -perm +111 \) | grep -v '\.appex/')"
+          [ "$missing" -eq 0 ] || exit 1
+          echo "all bundle-internal references resolve"
+
       # Everything must be signed inside-out, and the bundled Qt frameworks need
       # OUR identity too: with hardened runtime enabled, library validation
       # refuses to load nested code signed by a different team.

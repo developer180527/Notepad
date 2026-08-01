@@ -4,6 +4,8 @@
 // responsibility; see pagedocumentitem.h for the class definition.
 
 #include "document/pagedocumentitem.h"
+
+#include <QBuffer>
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QClipboard>
@@ -269,19 +271,38 @@ void PageDocumentItem::insertImage(const QImage &image)
     if (image.isNull())
         return;
 
-    // Keep the image at (near) full resolution so it stays crisp when shown
-    // small or zoomed in — only the *display* size is fit to the page width.
-    // A generous cap bounds memory/file size for very large originals.
+    // Keep the image at (near) full resolution so it stays crisp when zoomed in
+    // and when printed (A4 at 300 dpi is ~2480 px wide). A generous cap bounds
+    // very large originals.
     constexpr int kMaxStored = 3000;
     QImage stored = image;
     if (stored.width() > kMaxStored)
         stored = stored.scaledToWidth(kMaxStored, Qt::SmoothTransformation);
 
-    const QString name = QStringLiteral("img://%1.png").arg(QDateTime::currentMSecsSinceEpoch());
-    m_doc->addResource(QTextDocument::ImageResource, QUrl(name), stored);
+    const qreal w0 = stored.width();
+    const qreal h0 = stored.height();
 
-    qreal w = stored.width();
-    qreal h = stored.height();
+    // Store the *encoded* bytes rather than the decoded bitmap. A 3000 px photo
+    // is ~26 MB as ARGB32 but a couple of MB as PNG, and Qt decodes on demand
+    // when it actually paints. With several documents open that is the
+    // difference between holding every image of every background tab in full
+    // bitmap form and holding almost none of them.
+    const QString name = QStringLiteral("img://%1.png").arg(QDateTime::currentMSecsSinceEpoch());
+    QByteArray encoded;
+    {
+        QBuffer buffer(&encoded);
+        buffer.open(QIODevice::WriteOnly);
+        if (!stored.save(&buffer, "PNG"))
+            encoded.clear();
+    }
+    if (!encoded.isEmpty())
+        m_doc->addResource(QTextDocument::ImageResource, QUrl(name), encoded);
+    else
+        m_doc->addResource(QTextDocument::ImageResource, QUrl(name), stored);
+    stored = QImage();          // drop our decoded copy; the document has the bytes
+
+    qreal w = w0;
+    qreal h = h0;
     const qreal maxW = textW();
     if (maxW > 0 && w > maxW) {
         h *= maxW / w;       // fit to text width, preserving aspect
