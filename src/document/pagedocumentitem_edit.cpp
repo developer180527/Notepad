@@ -121,6 +121,35 @@ void PageDocumentItem::fitContentToPageWidth()
     m_doc->setModified(wasModified);
 }
 
+// The word under a point. Returns empty when the click is not on a word.
+QString PageDocumentItem::wordAt(const QPointF &itemPos, int *startOut, int *lengthOut) const
+{
+    const int pos = documentPositionAt(itemPos);
+    if (pos < 0)
+        return {};
+    QTextCursor c(m_doc);
+    c.setPosition(pos);
+    c.select(QTextCursor::WordUnderCursor);
+    const QString word = c.selectedText();
+    if (word.trimmed().isEmpty())
+        return {};
+    if (startOut)
+        *startOut = c.selectionStart();
+    if (lengthOut)
+        *lengthOut = c.selectionEnd() - c.selectionStart();
+    return word;
+}
+
+void PageDocumentItem::replaceRange(int start, int length, const QString &with)
+{
+    QTextCursor c(m_doc);
+    c.setPosition(start);
+    c.setPosition(start + length, QTextCursor::KeepAnchor);
+    c.insertText(with);
+    m_cursor = c;
+    afterCursorMoved();
+}
+
 void PageDocumentItem::documentReset()
 {
     fitContentToPageWidth();

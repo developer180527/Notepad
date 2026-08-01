@@ -10,7 +10,8 @@
 class PageDocumentItem;
 class CanvasView;
 class RulerWidget;
-class CodeHighlighter;
+class DocumentHighlighter;
+class SpellChecker;
 class QGraphicsScene;
 class QTextDocument;
 
@@ -79,6 +80,13 @@ public:
     bool markdownSourceMode() const { return m_mdSourceMode; }
     void setMarkdownSourceMode(bool raw);
     void applySyntaxMode(const QString &suffix);   // monospace + JSON/YAML colouring
+
+    // Spell checking. The checker is app-wide and shared; the document just
+    // points its highlighter at it.
+    static SpellChecker *spellChecker();           // shared instance, never null
+    static bool spellCheckEnabled();
+    static void setSpellCheckEnabled(bool on);
+    void refreshSpellChecking();                   // re-apply the current setting
     void setRulerVisible(bool visible);
 
     void updateSceneRect();
@@ -98,7 +106,7 @@ private:
     QGraphicsScene *m_scene = nullptr;
     CanvasView *m_view = nullptr;
     RulerWidget *m_ruler = nullptr;
-    CodeHighlighter *m_highlighter = nullptr;
+    DocumentHighlighter *m_highlighter = nullptr;
 
     QString m_filePath;
     QString m_chosenName;      // name for an unsaved document (from a tab rename)

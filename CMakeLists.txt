@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 project(Notepad VERSION 3.0.0 LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport Network LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport Network TextToSpeech LinguistTools)
 
 qt_standard_project_setup()
 
@@ -37,10 +37,10 @@ qt_add_executable(Notepad
     src/document/pagedocumentitem_find.cpp
     src/document/pagedocumentitem_images.cpp
     src/document/pagedocumentitem_input.cpp
-    src/document/codehighlighter.h
+    src/document/documenthighlighter.h
     src/document/documentexport.h
     src/document/documentexport.cpp
-    src/document/codehighlighter.cpp
+    src/document/documenthighlighter.cpp
 
     # widgets/  — reusable UI pieces with no document knowledge
     src/widgets/canvasview.h
@@ -62,6 +62,10 @@ qt_add_executable(Notepad
     # util/     — leaf helpers
     src/util/fontlibrary.h
     src/util/theme.h
+    src/util/spellchecker.h
+    src/util/spellchecker.cpp
+    src/util/speech.h
+    src/util/speech.cpp
     src/util/theme.cpp
     src/util/fontlibrary.cpp
 )
@@ -121,12 +125,17 @@ target_link_libraries(Notepad
         Qt::Svg
         Qt::PrintSupport
         Qt::Network
+        Qt::TextToSpeech
 )
 
 # macOS: register the .note document type, and add Quick Look + thumbnail
 # extensions so Finder shows a content preview of .note files.
 if(APPLE)
     enable_language(OBJC)
+    enable_language(OBJCXX)
+    # NSSpellChecker lives in AppKit; the backend is Objective-C++.
+    target_sources(Notepad PRIVATE src/util/spellchecker_mac.mm)
+    target_link_libraries(Notepad PRIVATE "-framework AppKit")
 
     set_target_properties(Notepad PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in
@@ -215,6 +224,25 @@ endif()
 # files. The app already opens a .note from argv (double-click via the desktop
 # entry). Run update-mime-database / update-desktop-database after install.
 if(UNIX AND NOT APPLE)
+    # Enchant brokers whichever spell engine the user has (hunspell/aspell), so
+    # we ship no dictionaries. Entirely optional: without it the app builds fine
+    # and spell checking is simply unavailable.
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ENCHANT QUIET enchant-2)
+        if(NOT ENCHANT_FOUND)
+            pkg_check_modules(ENCHANT QUIET enchant)
+        endif()
+    endif()
+    if(ENCHANT_FOUND)
+        target_compile_definitions(Notepad PRIVATE NOTEPAD_HAVE_ENCHANT)
+        target_include_directories(Notepad PRIVATE ${ENCHANT_INCLUDE_DIRS})
+        target_link_libraries(Notepad PRIVATE ${ENCHANT_LIBRARIES})
+        message(STATUS "Spell checking: Enchant ${ENCHANT_VERSION}")
+    else()
+        message(STATUS "Spell checking: Enchant not found, feature disabled")
+    endif()
+
     # DBus lets "Show in Folder" select the file in the user's file manager.
     find_package(Qt6 COMPONENTS DBus QUIET)
     if(Qt6DBus_FOUND)

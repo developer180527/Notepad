@@ -9,7 +9,7 @@
 #include "widgets/canvasview.h"
 #include "document/documentview.h"
 #include "widgets/documenttabbar.h"
-#include "document/codehighlighter.h"
+#include "document/documenthighlighter.h"
 #include "widgets/findbar.h"
 #include "widgets/fontcombo.h"
 #include "util/fontlibrary.h"

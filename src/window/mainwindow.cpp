@@ -4,7 +4,7 @@
 #include "widgets/canvasview.h"
 #include "document/documentview.h"
 #include "widgets/documenttabbar.h"
-#include "document/codehighlighter.h"
+#include "document/documenthighlighter.h"
 #include "widgets/findbar.h"
 #include "util/theme.h"
 #include "widgets/fontcombo.h"
@@ -137,9 +137,12 @@ MainWindow::MainWindow(bool withInitialDocument, QWidget *parent)
         setPalette(QApplication::palette());
         applyCanvasTheme();
         refreshIcons();
-        for (int i = 0; i < m_stack->count(); ++i)
-            if (DocumentView *d = documentAt(i))
+        for (int i = 0; i < m_stack->count(); ++i) {
+            if (DocumentView *d = documentAt(i)) {
+                d->refreshSpellChecking();  // the spelling switch lives here too
                 d->editor()->update();      // page colours changed
+            }
+        }
     });
     setupToolBar();
     setupStatusBar();

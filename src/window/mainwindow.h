@@ -12,7 +12,7 @@
 class PageDocumentItem;
 class DocumentView;
 class DocumentTabBar;
-class CodeHighlighter;
+class DocumentHighlighter;
 class FontCombo;
 class CanvasView;
 class FindBar;

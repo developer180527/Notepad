@@ -1,8 +1,9 @@
 #include "document/documentview.h"
 
 #include "widgets/canvasview.h"
-#include "document/codehighlighter.h"
+#include "document/documenthighlighter.h"
 #include "document/documentexport.h"
+#include "util/spellchecker.h"
 #include "util/fontlibrary.h"
 #include "document/pagedocumentitem.h"
 #include "widgets/rulerwidget.h"
@@ -17,6 +18,7 @@
 #include <QList>
 #include <QPair>
 #include <QScrollBar>
+#include <QSettings>
 #include <QSet>
 #include <QTextBlock>
 #include <QTextCharFormat>
@@ -79,10 +81,18 @@ DocumentView::DocumentView(QWidget *parent)
     });
     connect(m_editor, &PageDocumentItem::openFileRequested, this,
             &DocumentView::openFileRequested);
+    // Learning or ignoring a word changes the verdict for text already laid
+    // out, so the whole document has to be re-examined.
+    connect(m_editor, &PageDocumentItem::rehighlightRequested, this, [this] {
+        if (m_highlighter)
+            m_highlighter->rehighlight();
+    });
 
     applyBaseFont();
     applyPageSetup();
     updateSceneRect();
+
+    refreshSpellChecking();
 
     // Setting the default font and page metrics counts as touching the document,
     // so a brand-new view would otherwise report itself as modified — which
@@ -276,19 +286,49 @@ void DocumentView::applyPageSetup()
 
 // ---------------------------------------------------------------- view modes
 
+SpellChecker *DocumentView::spellChecker()
+{
+    // One backend for the whole app: it holds the user's session-ignored words,
+    // and creating one per document would scatter that state.
+    static SpellChecker *checker = SpellChecker::create();
+    return checker;
+}
+
+bool DocumentView::spellCheckEnabled()
+{
+    if (!spellChecker()->isAvailable())
+        return false;
+    return QSettings().value(QStringLiteral("editor/spellCheck"), true).toBool();
+}
+
+void DocumentView::setSpellCheckEnabled(bool on)
+{
+    QSettings().setValue(QStringLiteral("editor/spellCheck"), on);
+}
+
+void DocumentView::refreshSpellChecking()
+{
+    if (!m_highlighter)
+        m_highlighter = new DocumentHighlighter(m_editor->document());
+    m_highlighter->setSpellChecker(spellCheckEnabled() ? spellChecker() : nullptr);
+}
+
 // Data/code files (JSON, YAML) get a monospace page and syntax colouring;
 // everything else reverts to the normal prose font with highlighting off.
 void DocumentView::applySyntaxMode(const QString &suffix)
 {
     if (!m_highlighter)
-        m_highlighter = new CodeHighlighter(m_editor->document());
+        m_highlighter = new DocumentHighlighter(m_editor->document());
 
-    const CodeHighlighter::Language lang = CodeHighlighter::languageForSuffix(suffix);
-    if (lang != CodeHighlighter::Language::None) {
+    const DocumentHighlighter::Language lang = DocumentHighlighter::languageForSuffix(suffix);
+    if (lang != DocumentHighlighter::Language::None) {
         m_baseFontFamily = QStringLiteral("JetBrains Mono");
         applyBaseFont();
     }
     m_highlighter->setLanguage(lang);
+    // Syntax colouring and spell checking share one highlighter and are mutually
+    // exclusive; re-assert the spell setting so prose files regain underlines.
+    refreshSpellChecking();
 }
 
 // Raw Markdown ⇄ rendered document. Converting through toMarkdown()/setMarkdown()

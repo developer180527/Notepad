@@ -4,6 +4,10 @@
 // responsibility; see pagedocumentitem.h for the class definition.
 
 #include "document/pagedocumentitem.h"
+
+#include "document/documentview.h"
+#include "util/spellchecker.h"
+#include "util/speech.h"
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QClipboard>
@@ -317,6 +321,10 @@ void PageDocumentItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
 {
     const int imgPos = imageAt(event->pos());
     if (imgPos < 0) {
+        // Spelling comes first: a misspelled word under the pointer is the most
+        // likely reason to right-click in prose.
+        if (spellingMenuFor(event))
+            return;
         // Right-click inside a table → row/column operations.
         QTextCursor probe(m_doc);
         probe.setPosition(documentPositionAt(event->pos()));
@@ -403,4 +411,61 @@ void PageDocumentItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
         if (chosen == actions.at(i))
             changeWrapMode(imgPos, items[i].mode);
     event->accept();
+}
+
+// Offer corrections for a misspelled word, plus pronunciation. Returns true when
+// it handled the event, so the caller can fall through to its other menus.
+bool PageDocumentItem::spellingMenuFor(QGraphicsSceneContextMenuEvent *event)
+{
+    SpellChecker *checker = DocumentView::spellChecker();
+    if (!checker->isAvailable() || !DocumentView::spellCheckEnabled())
+        return false;
+
+    int start = 0;
+    int length = 0;
+    const QString word = wordAt(event->pos(), &start, &length);
+    if (word.isEmpty() || checker->isCorrect(word))
+        return false;
+
+    setFocus();
+    QMenu menu;
+    const QStringList guesses = checker->suggestions(word).mid(0, 8);
+    QList<QAction *> fixes;
+    if (guesses.isEmpty()) {
+        QAction *none = menu.addAction(tr("No suggestions"));
+        none->setEnabled(false);
+    } else {
+        for (const QString &g : guesses) {
+            QAction *a = menu.addAction(g);
+            QFont bold = a->font();
+            bold.setBold(fixes.isEmpty());     // the best guess stands out
+            a->setFont(bold);
+            fixes << a;
+        }
+    }
+    menu.addSeparator();
+    QAction *learn = menu.addAction(tr("Add to Dictionary"));
+    QAction *ignore = menu.addAction(tr("Ignore"));
+    menu.addSeparator();
+    QAction *speak = menu.addAction(tr("Pronounce \"%1\"").arg(word));
+
+    QAction *chosen = menu.exec(event->screenPos());
+    if (!chosen) {
+        event->accept();
+        return true;
+    }
+    if (chosen == learn) {
+        checker->learn(word);
+    } else if (chosen == ignore) {
+        checker->ignore(word);
+    } else if (chosen == speak) {
+        Speech::say(word);
+    } else if (fixes.contains(chosen)) {
+        replaceRange(start, length, chosen->text());
+    }
+    // learn/ignore change the verdict for text already laid out, so re-run.
+    if (chosen == learn || chosen == ignore)
+        emit rehighlightRequested();
+    event->accept();
+    return true;
 }

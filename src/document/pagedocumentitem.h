@@ -54,6 +54,9 @@ public:
     void setBaseFont(const QFont &font);
     void insertImage(const QImage &image);
     void insertTable(int rows, int columns);
+    // The word under a point, and its range — used for the spelling menu.
+    QString wordAt(const QPointF &itemPos, int *startOut = nullptr, int *lengthOut = nullptr) const;
+    void replaceRange(int start, int length, const QString &with);
     void documentReset();          // call after loading new content into document()
     // Reflow anything wider than the text column back inside the page.
     void fitContentToPageWidth();
@@ -84,6 +87,7 @@ public:
     void setPageLayoutMetrics(const QSizeF &sheetPx, const QMarginsF &marginsPx, qreal gapPx);
 
 signals:
+    void rehighlightRequested();   // dictionary changed; verdicts are stale
     void cursorPositionChanged();
     void contentsChanged();
     void pageCountChanged(int count);
@@ -108,6 +112,7 @@ protected:
     void dragMoveEvent(QGraphicsSceneDragDropEvent *event) override;
     void dropEvent(QGraphicsSceneDragDropEvent *event) override;
     void contextMenuEvent(QGraphicsSceneContextMenuEvent *event) override;
+    bool spellingMenuFor(QGraphicsSceneContextMenuEvent *event);
 
 private:
     qreal textW() const { return m_sheetSize.width() - m_margins.left() - m_margins.right(); }

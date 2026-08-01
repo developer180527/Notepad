@@ -2,6 +2,10 @@
 
 #include "util/theme.h"
 
+#include "document/documentview.h"
+#include "util/spellchecker.h"
+
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -36,9 +40,20 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     hintFont.setPointSizeF(hintFont.pointSizeF() - 1);
     hint->setFont(hintFont);
 
+    m_spellCheck = new QCheckBox(tr("Check spelling as I type"), this);
+    m_spellCheck->setChecked(DocumentView::spellCheckEnabled());
+    // Nothing to offer when the platform has no dictionary; say so rather than
+    // presenting a switch that does nothing.
+    if (!DocumentView::spellChecker()->isAvailable()) {
+        m_spellCheck->setEnabled(false);
+        m_spellCheck->setChecked(false);
+        m_spellCheck->setToolTip(tr("No system dictionary is available on this computer."));
+    }
+
     auto *form = new QFormLayout;
     form->addRow(tr("App theme:"), m_appTheme);
     form->addRow(tr("Page:"), m_pageTheme);
+    form->addRow(tr("Spelling:"), m_spellCheck);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::accept);
@@ -56,5 +71,9 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     connect(m_pageTheme, &QComboBox::currentIndexChanged, this, [this](int i) {
         Theme::instance().setPageTheme(
             static_cast<Theme::PageTheme>(m_pageTheme->itemData(i).toInt()));
+    });
+    connect(m_spellCheck, &QCheckBox::toggled, this, [](bool on) {
+        DocumentView::setSpellCheckEnabled(on);
+        emit Theme::instance().changed();   // every open document re-reads it
     });
 }

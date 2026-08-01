@@ -1,6 +1,10 @@
-#include "document/codehighlighter.h"
+#include "document/documenthighlighter.h"
 
 #include <QTextDocument>
+
+#include "util/spellchecker.h"
+
+#include <QRegularExpressionMatchIterator>
 
 namespace {
 
@@ -23,12 +27,12 @@ QTextCharFormat fmtOf(const QColor &c, bool italic = false, bool bold = false)
 
 } // namespace
 
-CodeHighlighter::CodeHighlighter(QTextDocument *parent)
+DocumentHighlighter::DocumentHighlighter(QTextDocument *parent)
     : QSyntaxHighlighter(parent)
 {
 }
 
-CodeHighlighter::Language CodeHighlighter::languageForSuffix(const QString &suffix)
+DocumentHighlighter::Language DocumentHighlighter::languageForSuffix(const QString &suffix)
 {
     const QString s = suffix.toLower();
     if (s == QLatin1String("json"))
@@ -38,7 +42,7 @@ CodeHighlighter::Language CodeHighlighter::languageForSuffix(const QString &suff
     return Language::None;
 }
 
-void CodeHighlighter::setLanguage(Language lang)
+void DocumentHighlighter::setLanguage(Language lang)
 {
     if (m_lang == lang)
         return;
@@ -47,7 +51,7 @@ void CodeHighlighter::setLanguage(Language lang)
     rehighlight();
 }
 
-void CodeHighlighter::rebuildRules()
+void DocumentHighlighter::rebuildRules()
 {
     m_rules.clear();
     if (m_lang == Language::None)
@@ -88,8 +92,51 @@ void CodeHighlighter::rebuildRules()
                     fmtOf(kComment, true), 0});
 }
 
-void CodeHighlighter::highlightBlock(const QString &text)
+void DocumentHighlighter::setSpellChecker(SpellChecker *checker)
 {
+    SpellChecker *usable = (checker && checker->isAvailable()) ? checker : nullptr;
+    if (m_spell == usable)
+        return;
+    m_spell = usable;
+    rehighlight();
+}
+
+bool DocumentHighlighter::spellCheckingActive() const
+{
+    return m_spell != nullptr && m_lang == Language::None;
+}
+
+// Underline misspelled words with the platform's own squiggle. Applied as an
+// additional format, so it never becomes part of the document and cannot leak
+// into a save or an export.
+void DocumentHighlighter::markMisspellings(const QString &text)
+{
+    // Letters, plus the apostrophes that belong inside words ("don't", "O'Neill").
+    static const QRegularExpression word(
+        QStringLiteral("[\\p{L}]+(?:['\u2019][\\p{L}]+)*"));
+
+    // WaveUnderline, not SpellCheckUnderline: the latter defers to QStyle to do
+    // the drawing, and the page is rendered through QAbstractTextDocumentLayout
+    // without a style context, so it comes out invisible. A wave is what the
+    // platform style resolves to anyway — this just draws it unconditionally.
+    QTextCharFormat fmt;
+    fmt.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+    fmt.setUnderlineColor(QColor(0xD0, 0x3A, 0x2E));
+
+    auto it = word.globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        if (!m_spell->isCorrect(m.captured()))
+            setFormat(m.capturedStart(), m.capturedLength(), fmt);
+    }
+}
+
+void DocumentHighlighter::highlightBlock(const QString &text)
+{
+    if (spellCheckingActive()) {
+        markMisspellings(text);
+        return;
+    }
     if (m_lang == Language::None || m_rules.isEmpty())
         return;
 

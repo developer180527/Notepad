@@ -3,6 +3,7 @@
 
 #include <QDialog>
 
+class QCheckBox;
 class QComboBox;
 
 // Preferences. Changes apply immediately (and to every open window) rather than
@@ -16,6 +17,7 @@ public:
 private:
     QComboBox *m_appTheme = nullptr;
     QComboBox *m_pageTheme = nullptr;
+    QCheckBox *m_spellCheck = nullptr;
 };
 
 #endif // SETTINGSDIALOG_H
