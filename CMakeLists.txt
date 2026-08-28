@@ -1,7 +1,13 @@
 cmake_minimum_required(VERSION 3.19)
 project(Notepad VERSION 3.1.0 LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport Network TextToSpeech LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Svg PrintSupport Network LinguistTools)
+
+# Pronunciation. QtTextToSpeech is an add-on module, not part of a default Qt
+# install, so treat it the way we treat the spell-check backends: present means
+# the feature works, absent means the feature is quietly unavailable — never a
+# build failure.
+find_package(Qt6 6.5 QUIET COMPONENTS TextToSpeech)
 
 qt_standard_project_setup()
 
@@ -125,8 +131,15 @@ target_link_libraries(Notepad
         Qt::Svg
         Qt::PrintSupport
         Qt::Network
-        Qt::TextToSpeech
 )
+
+if(Qt6TextToSpeech_FOUND)
+    target_link_libraries(Notepad PRIVATE Qt::TextToSpeech)
+    target_compile_definitions(Notepad PRIVATE NOTEPAD_HAVE_TTS)
+    message(STATUS "Pronunciation: QtTextToSpeech found")
+else()
+    message(STATUS "Pronunciation: QtTextToSpeech not found, feature disabled")
+endif()
 
 # macOS: register the .note document type, and add Quick Look + thumbnail
 # extensions so Finder shows a content preview of .note files.
@@ -290,4 +303,22 @@ if(APPLE OR WIN32)
         NO_UNSUPPORTED_PLATFORM_ERROR
     )
     install(SCRIPT ${deploy_script})
+endif()
+
+# --- Linux packaging ------------------------------------------------------
+# The AppImage is the portable option; a .deb is what most people expect to be
+# able to double-click and have appear in their application menu.
+if(UNIX AND NOT APPLE)
+    set(CPACK_GENERATOR "DEB")
+    set(CPACK_PACKAGE_NAME "notepad")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_CONTACT "Notepad")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A small, fast, paginated text editor")
+    set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/developer180527/Notepad")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "editors")
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    # Let dpkg-shlibdeps work out the Qt runtime dependencies, so the package
+    # refuses to install rather than failing to start with a missing library.
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    include(CPack)
 endif()

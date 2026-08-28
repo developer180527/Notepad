@@ -28,6 +28,25 @@
 #include <QVBoxLayout>
 
 namespace {
+
+// Turns the undo stack off for the duration of a bulk load and restores it
+// afterwards. setUndoRedoEnabled(false) also clears the stacks, so the document
+// comes back with a clean history — which is what you want after opening a file.
+class UndoSuspension
+{
+public:
+    explicit UndoSuspension(QTextDocument *doc)
+        : m_doc(doc), m_wasEnabled(doc->isUndoRedoEnabled())
+    {
+        m_doc->setUndoRedoEnabled(false);
+    }
+    ~UndoSuspension() { m_doc->setUndoRedoEnabled(m_wasEnabled); }
+
+private:
+    QTextDocument *m_doc;
+    bool m_wasEnabled;
+};
+
 constexpr quint32 kNoteVersion = 3;   // v2 adds fonts; v3 adds a preview image
 const char *kNoteMagic = "PPNOTE";
 } // namespace
@@ -71,6 +90,10 @@ DocumentView::DocumentView(QWidget *parent)
     });
     connect(m_view->horizontalScrollBar(), &QScrollBar::valueChanged, this,
             [this](int) { m_ruler->update(); });
+    // Spell checking follows the viewport, so a large document is only ever
+    // checked a screenful at a time.
+    connect(m_view->verticalScrollBar(), &QScrollBar::valueChanged, this,
+            [this](int) { updateSpellRange(); });
 
     connect(m_editor->document(), &QTextDocument::modificationChanged, this,
             &DocumentView::modifiedChanged);
@@ -310,7 +333,22 @@ void DocumentView::refreshSpellChecking()
 {
     if (!m_highlighter)
         m_highlighter = new DocumentHighlighter(m_editor->document());
+    updateSpellRange();
     m_highlighter->setSpellChecker(spellCheckEnabled() ? spellChecker() : nullptr);
+}
+
+void DocumentView::updateSpellRange()
+{
+    if (!m_highlighter || !m_view)
+        return;
+    // The viewport in the item's own coordinates, padded by a screenful so that
+    // scrolling reveals text that has already been checked.
+    QRectF visible = m_view->mapToScene(m_view->viewport()->rect()).boundingRect();
+    visible.adjust(0, -visible.height(), 0, visible.height());
+    int from = 0;
+    int to = 0;
+    m_editor->documentRangeFor(visible, &from, &to);
+    m_highlighter->setSpellRange(from, to);
 }
 
 // Data/code files (JSON, YAML) get a monospace page and syntax colouring;
@@ -378,18 +416,29 @@ bool DocumentView::load(const QString &path, QString *errorOut)
     const QString text = QString::fromUtf8(file.readAll());
     file.close();
 
-    if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"))
-        m_editor->document()->setMarkdown(text);
-    else if (suffix == QLatin1String("html") || suffix == QLatin1String("htm"))
-        m_editor->document()->setHtml(text);
-    else
-        m_editor->document()->setPlainText(text);
-
-    applySyntaxMode(suffix);
-    m_editor->documentReset();
+    // Loading with undo enabled records the whole file as one giant undo step:
+    // a 1.1 MB Markdown file cost 70 MB of history that the user can never even
+    // use, since there is nothing to undo back to. Suppressing it during the
+    // load brings that to ~0.2 MB, and undo still covers everything the user
+    // actually does afterwards.
+    {
+        // The suspension has to cover the whole load, not just the text: setting
+        // the default font and reflowing content to the page are themselves
+        // document-wide undoable operations, and each records another full copy.
+        const UndoSuspension noUndo(m_editor->document());
+        if (suffix == QLatin1String("md") || suffix == QLatin1String("markdown"))
+            m_editor->document()->setMarkdown(text);
+        else if (suffix == QLatin1String("html") || suffix == QLatin1String("htm"))
+            m_editor->document()->setHtml(text);
+        else
+            m_editor->document()->setPlainText(text);
+        applySyntaxMode(suffix);
+        m_editor->documentReset();
+    }
     m_editor->document()->setModified(false);
     return true;
 }
+
 
 bool DocumentView::save(const QString &path, QString *errorOut)
 {
@@ -581,8 +630,11 @@ bool DocumentView::loadNote(const QString &path, QString *errorOut)
     }
     file.close();
 
-    m_editor->document()->setHtml(html);
-    m_editor->documentReset();
+    {
+        const UndoSuspension noUndo(m_editor->document());
+        m_editor->document()->setHtml(html);
+        m_editor->documentReset();
+    }
     m_editor->document()->setModified(false);
     return true;
 }

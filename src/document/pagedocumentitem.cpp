@@ -106,6 +106,34 @@ QRectF PageDocumentItem::boundingRect() const
     return QRectF(-2, -2, m_sheetSize.width() + 16, total + 16); // room for shadow
 }
 
+void PageDocumentItem::documentRangeFor(const QRectF &itemRect, int *from, int *to) const
+{
+    if (from) *from = 0;
+    if (to)   *to = 0;
+
+    const qreal stride = m_sheetSize.height() + m_gap;
+    const qreal th = textH();
+    if (stride <= 0 || th <= 0 || m_pageCount < 1)
+        return;
+
+    // The rect can be empty or unnormalised before the view has a size, so
+    // clamp explicitly rather than assuming top <= bottom.
+    const QRectF r = itemRect.normalized();
+    const int maxPage = m_pageCount - 1;
+    int firstPage = r.isEmpty() ? 0 : int(std::floor(r.top() / stride));
+    int lastPage = r.isEmpty() ? maxPage : int(std::floor(r.bottom() / stride));
+    firstPage = qMax(0, qMin(firstPage, maxPage));
+    lastPage = qMax(firstPage, qMin(lastPage, maxPage));
+
+    QAbstractTextDocumentLayout *layout = m_doc->documentLayout();
+    // hitTest in document space: pages are laid out as one continuous column of
+    // height textH() each, which is exactly how paint() slices them.
+    if (from)
+        *from = layout->hitTest(QPointF(0, firstPage * th), Qt::FuzzyHit);
+    if (to)
+        *to = layout->hitTest(QPointF(textW(), (lastPage + 1) * th), Qt::FuzzyHit);
+}
+
 void PageDocumentItem::recomputePages()
 {
     // Note: do NOT setPageSize here — it can force a full document relayout, and
@@ -135,6 +163,79 @@ void PageDocumentItem::setPageLayoutMetrics(const QSizeF &sheetPx, const QMargin
 }
 
 // --------------------------------------------------------------- painting
+
+// A page's static content: text plus search highlights. A live selection is
+// excluded — it changes constantly while dragging, and caching it would mean
+// re-rendering the page on every mouse move — so a selected page is drawn
+// directly instead.
+void PageDocumentItem::drawPageContent(QPainter *painter, int page, const QRectF &tr,
+                                      const QRectF &exposed)
+{
+    const qreal th = textH();
+    const Theme &theme = Theme::instance();
+
+    QPalette pal;
+    pal.setColor(QPalette::Text, theme.pageTextColor());
+
+    QTextCharFormat searchFmt;
+    searchFmt.setBackground(QColor(255, 230, 64));
+    searchFmt.setForeground(Qt::black);
+
+    // Restricting the clip to what is actually on screen lets the layout skip
+    // blocks entirely. At high zoom only a sliver of the page is visible, so
+    // this is the difference between laying out one screenful and a whole page.
+    auto pageClip = [&](bool wholePage) {
+        const QRectF full(0, page * th, textW(), th);
+        if (wholePage || !exposed.isValid())
+            return full;
+        const QRectF vis = exposed.intersected(tr);
+        if (!vis.isValid())
+            return full;
+        return QRectF(vis.left() - tr.left(), vis.top() - tr.top() + page * th,
+                      vis.width(), vis.height()).intersected(full);
+    };
+
+    auto renderInto = [&](QPainter *p, bool withSelection, bool wholePage) {
+        QAbstractTextDocumentLayout::PaintContext ctx;
+        ctx.palette = pal;
+        ctx.clip = pageClip(wholePage);
+        for (const QTextCursor &match : m_matchesByPage.value(page)) {
+            QAbstractTextDocumentLayout::Selection sel;
+            sel.cursor = match;
+            sel.format = searchFmt;
+            ctx.selections.append(sel);
+        }
+        if (withSelection && m_cursor.hasSelection()) {
+            QAbstractTextDocumentLayout::Selection sel;
+            sel.cursor = m_cursor;
+            sel.format.setBackground(QApplication::palette().color(QPalette::Highlight));
+            sel.format.setForeground(QApplication::palette().color(QPalette::HighlightedText));
+            ctx.selections.append(sel);
+        }
+        m_doc->documentLayout()->draw(p, ctx);
+    };
+
+    // Selection present on this page: bypass the cache entirely.
+    const bool selectionHere = m_cursor.hasSelection()
+        && pageForPosition(m_cursor.selectionStart()) <= page
+        && pageForPosition(m_cursor.selectionEnd()) >= page;
+    if (selectionHere) {
+        painter->save();
+        painter->setClipRect(tr);
+        painter->translate(tr.topLeft());
+        painter->translate(0, -page * th);
+        renderInto(painter, true, false);
+        painter->restore();
+        return;
+    }
+
+    painter->save();
+    painter->setClipRect(tr);
+    painter->translate(tr.topLeft());
+    painter->translate(0, -page * th);
+    renderInto(painter, false, false);
+    painter->restore();
+}
 
 void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
                              QWidget *)
@@ -176,35 +277,21 @@ void PageDocumentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *
 
         // Draw this page's slice of the document into its text rect.
         const QRectF tr = textRect(page);
-        painter->save();
-        painter->setClipRect(tr);
-        painter->translate(tr.topLeft());
-        painter->translate(0, -page * th);
+        drawPageContent(painter, page, tr, exposed);
 
-        QAbstractTextDocumentLayout::PaintContext ctx;
-        ctx.palette = pal;
-        ctx.clip = QRectF(0, page * th, textW(), th);
-        if (m_focused && m_caretOn && !m_cursor.hasSelection())
-            ctx.cursorPosition = m_cursor.position();
-
-        // Find: highlight this page's matches in yellow (drawn first, under the
-        // caret selection so the active match still stands out).
-        const QList<QTextCursor> pageMatches = m_matchesByPage.value(page);
-        for (const QTextCursor &match : pageMatches) {
-            QAbstractTextDocumentLayout::Selection sel;
-            sel.cursor = match;
-            sel.format = searchFmt;
-            ctx.selections.append(sel);
+        // The caret is drawn here rather than by the layout, so that a blink
+        // never invalidates a cached page.
+        if (m_focused && m_caretOn && !m_cursor.hasSelection()
+            && pageForPosition(m_cursor.position()) == page) {
+            const QRectF caret = caretSceneRect();
+            if (caret.isValid()) {
+                painter->save();
+                painter->setClipRect(tr);
+                painter->fillRect(QRectF(caret.left(), caret.top(), 1.0, caret.height()),
+                                  pal.color(QPalette::Text));
+                painter->restore();
+            }
         }
-        if (m_cursor.hasSelection()) {
-            QAbstractTextDocumentLayout::Selection sel;
-            sel.cursor = m_cursor;
-            sel.format.setBackground(highlight);
-            sel.format.setForeground(highlightText);
-            ctx.selections.append(sel);
-        }
-        m_doc->documentLayout()->draw(painter, ctx);
-        painter->restore();
     }
 
     // Selection chrome for an image: a border plus 8 resize handles.

@@ -87,6 +87,10 @@ public:
     static bool spellCheckEnabled();
     static void setSpellCheckEnabled(bool on);
     void refreshSpellChecking();                   // re-apply the current setting
+
+private:
+    void updateSpellRange();     // tell the highlighter what is on screen
+public:
     void setRulerVisible(bool visible);
 
     void updateSceneRect();

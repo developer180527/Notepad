@@ -140,7 +140,7 @@ MainWindow::MainWindow(bool withInitialDocument, QWidget *parent)
         for (int i = 0; i < m_stack->count(); ++i) {
             if (DocumentView *d = documentAt(i)) {
                 d->refreshSpellChecking();  // the spelling switch lives here too
-                d->editor()->update();      // page colours changed
+                d->editor()->update();
             }
         }
     });

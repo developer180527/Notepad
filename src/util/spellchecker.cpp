@@ -1,5 +1,6 @@
 #include "util/spellchecker.h"
 
+#include <QHash>
 #include <QLocale>
 #include <QRegularExpression>
 
@@ -46,6 +47,67 @@ bool worthChecking(const QString &word)
 
 class NullSpellChecker final : public SpellChecker
 {
+};
+
+// Every backend here is a call into the OS, and highlighting a large document
+// asks about the same words over and over — a 670 kB Markdown file produced
+// 120,210 lookups for 79 distinct words. Memoising the verdicts turns that into
+// one call per distinct word.
+class CachingSpellChecker final : public SpellChecker
+{
+public:
+    explicit CachingSpellChecker(SpellChecker *backend) : m_backend(backend) {}
+    ~CachingSpellChecker() override { delete m_backend; }
+
+    bool isAvailable() const override { return m_backend->isAvailable(); }
+
+    bool isCorrect(const QString &word) const override
+    {
+        const auto it = m_verdicts.constFind(word);
+        if (it != m_verdicts.constEnd())
+            return *it;
+        // A document with a huge vocabulary should not grow the cache without
+        // bound; past the cap, start over rather than track access order.
+        if (m_verdicts.size() >= kMaxWords)
+            m_verdicts.clear();
+        const bool correct = m_backend->isCorrect(word);
+        m_verdicts.insert(word, correct);
+        return correct;
+    }
+
+    // Suggestions are only ever requested for one word at a time, from a menu,
+    // so they are not worth caching.
+    QStringList suggestions(const QString &word) const override
+    {
+        return m_backend->suggestions(word);
+    }
+
+    void learn(const QString &word) override
+    {
+        m_backend->learn(word);
+        m_verdicts.remove(word);       // the answer just changed
+    }
+
+    void ignore(const QString &word) override
+    {
+        m_backend->ignore(word);
+        m_verdicts.remove(word);
+    }
+
+    QString language() const override { return m_backend->language(); }
+
+    void setLanguage(const QString &language) override
+    {
+        m_backend->setLanguage(language);
+        m_verdicts.clear();            // every verdict was language-specific
+    }
+
+    QStringList availableLanguages() const override { return m_backend->availableLanguages(); }
+
+private:
+    static constexpr int kMaxWords = 50000;
+    SpellChecker *m_backend;
+    mutable QHash<QString, bool> m_verdicts;
 };
 
 #if defined(NOTEPAD_HAVE_ENCHANT)
@@ -225,16 +287,16 @@ bool spellCheckWorthChecking(const QString &word)
 SpellChecker *SpellChecker::create()
 {
 #if defined(Q_OS_MACOS)
-    return createMacSpellChecker();
+    return new CachingSpellChecker(createMacSpellChecker());
 #elif defined(Q_OS_WIN)
     auto *win = new WinSpellChecker;
     if (win->isAvailable())
-        return win;
+        return new CachingSpellChecker(win);
     delete win;
 #elif defined(NOTEPAD_HAVE_ENCHANT)
     auto *enchant = new EnchantSpellChecker;
     if (enchant->isAvailable())
-        return enchant;
+        return new CachingSpellChecker(enchant);
     delete enchant;
 #endif
     return new NullSpellChecker;

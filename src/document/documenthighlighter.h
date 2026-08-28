@@ -34,6 +34,13 @@ public:
     // nullptr (or an unavailable checker) turns it off.
     void setSpellChecker(SpellChecker *checker);
     bool spellCheckingActive() const;
+
+    // Spell checking is confined to a document range — in practice whatever is
+    // on screen. Checking a whole document up front costs one dictionary call
+    // per word before anything can be shown (8.8 s for a 1 MB Markdown file),
+    // and almost all of it is for text the user cannot see. Blocks keep their
+    // underlines once checked, so scrolling fills the document in gradually.
+    void setSpellRange(int from, int to);
     Language language() const { return m_lang; }
 
     // Map a file suffix to a language (json / yaml / yml), else None.
@@ -54,6 +61,8 @@ private:
 
     Language m_lang = Language::None;
     SpellChecker *m_spell = nullptr;   // not owned
+    int m_spellFrom = 0;
+    int m_spellTo = -1;                // -1 = nothing checked yet
     QList<Rule> m_rules;
 };
 

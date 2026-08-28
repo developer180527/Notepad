@@ -84,6 +84,7 @@ void PageDocumentItem::setSearchHighlight(const QString &text, QTextDocument::Fi
 
 void PageDocumentItem::recomputeSearchMatches()
 {
+
     m_matchesByPage.clear();
     if (m_searchText.isEmpty())
         return;

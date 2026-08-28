@@ -1,7 +1,10 @@
 #include "util/speech.h"
 
-#include <QTextToSpeech>
+#if defined(NOTEPAD_HAVE_TTS)
+#  include <QTextToSpeech>
+#endif
 
+#if defined(NOTEPAD_HAVE_TTS)
 namespace {
 
 // Created on first use: constructing a synthesiser spins up a platform engine,
@@ -17,20 +20,29 @@ QTextToSpeech *synth()
 }
 
 } // namespace
+#endif // NOTEPAD_HAVE_TTS
 
 namespace Speech {
 
 bool isAvailable()
 {
+#if defined(NOTEPAD_HAVE_TTS)
     return synth()->state() != QTextToSpeech::Error;
+#else
+    return false;
+#endif
 }
 
 void say(const QString &text)
 {
+#if defined(NOTEPAD_HAVE_TTS)
     if (text.isEmpty() || !isAvailable())
         return;
     synth()->stop();               // cut off the previous word rather than queueing
     synth()->say(text);
+#else
+    Q_UNUSED(text);
+#endif
 }
 
 } // namespace Speech

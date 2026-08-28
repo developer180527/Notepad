@@ -45,6 +45,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION_MACOS }}
+          modules: qtspeech          # pronunciation; not in a default Qt install
           cache: true
 
       # The certificate lives in a throwaway keychain that is deleted at the end
@@ -244,6 +245,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION_WINDOWS }}
           arch: win64_msvc2022_64
+          modules: qtspeech
           cache: true
 
       - name: Set up MSVC environment
@@ -255,19 +257,40 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build
 
-      - name: Deploy Qt & package
+      - name: Deploy Qt & stage
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item build/Notepad.exe dist/
           Copy-Item build/NoteThumbnail.dll dist/
           windeployqt --release --dir dist dist/Notepad.exe
-          Compress-Archive -Path dist/* -DestinationPath Notepad-windows.zip
+          # Keep a portable zip alongside the installer for people who would
+          # rather not install anything.
+          Compress-Archive -Path dist/* -DestinationPath Notepad-windows-portable.zip
+
+      # A zip of loose DLLs is not something you can "install": no Start Menu
+      # entry, no uninstaller, no file association. Build a real installer.
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          # Tag v3.1.0 -> 3.1.0; a manual run has no tag, so fall back.
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { $version = '0.0.0' }
+          & $iscc "/DAppVersion=$version" "/DSourceDir=$(Resolve-Path dist)" windows\notepad.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+          Move-Item windows\Notepad-windows-setup.exe . -Force
+          Get-Item Notepad-windows-setup.exe | Format-List Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: Notepad-windows
-          path: Notepad-windows.zip
+          path: |
+            Notepad-windows-setup.exe
+            Notepad-windows-portable.zip
 
   # ----------------------------------------------------------------- Linux
   linux:
@@ -285,6 +308,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION_LINUX }}
+          modules: qtspeech
           cache: true
 
       - name: Configure & build
@@ -311,10 +335,21 @@ jobs:
             --executable AppDir/usr/bin/Notepad
           mv Notepad*.AppImage Notepad-linux-x86_64.AppImage
 
+      # A .deb for people who expect to install rather than run a portable file.
+      - name: Build .deb
+        run: |
+          set -eu
+          cd build && cpack -G DEB
+          mv ./*.deb "$GITHUB_WORKSPACE/" 2>/dev/null || \
+            find . -name '*.deb' -exec mv {} "$GITHUB_WORKSPACE/" \;
+          cd "$GITHUB_WORKSPACE" && ls -l ./*.deb
+
       - uses: actions/upload-artifact@v4
         with:
           name: Notepad-linux
-          path: Notepad-linux-x86_64.AppImage
+          path: |
+            Notepad-linux-x86_64.AppImage
+            *.deb
 
   # ----------------------------------------------------------------- Release
   release:
@@ -342,8 +377,8 @@ jobs:
             | Platform | File |
             |---|---|
             | macOS | `Notepad-macos.dmg` |
-            | Windows | `Notepad-windows.zip` |
-            | Linux | `Notepad-linux-x86_64.AppImage` |
+            | Windows | `Notepad-windows-setup.exe` (installer) or `Notepad-windows-portable.zip` |
+            | Linux | `notepad_*.deb` (Debian/Ubuntu) or `Notepad-linux-x86_64.AppImage` |
 
             ### Opening it on macOS
 
@@ -358,9 +393,17 @@ jobs:
 
             ### Opening it on Windows
 
-            SmartScreen may warn about an unrecognised publisher: choose
-            **More info → Run anyway**.
+            Run `Notepad-windows-setup.exe`. SmartScreen may warn about an
+            unrecognised publisher, because the installer is not signed with a
+            code-signing certificate: choose **More info → Run anyway**.
+
+            The installer adds a Start Menu entry, an uninstaller, and the
+            `.note` file association. It installs per-user unless you run it as
+            an administrator.
 
             ### Linux
 
-            `chmod +x Notepad-linux-x86_64.AppImage` and run it.
+            Debian/Ubuntu: `sudo apt install ./notepad_*.deb`.
+
+            Anywhere else: `chmod +x Notepad-linux-x86_64.AppImage` and run it —
+            an AppImage needs no installation.

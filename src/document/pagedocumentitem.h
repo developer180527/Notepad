@@ -122,6 +122,13 @@ private:
     int documentPositionAt(const QPointF &itemPos) const;
     int pageForPosition(int pos) const;
 
+public:
+    // Document positions covered by an item-space rectangle — used to tell the
+    // highlighter which text is actually on screen.
+    void documentRangeFor(const QRectF &itemRect, int *from, int *to) const;
+
+private:
+
     // Image selection / resize / wrap helpers.
     QTextImageFormat imageFormatAt(int pos) const;
     QRectF docRectToItem(const QRectF &docRect) const;
@@ -137,6 +144,11 @@ private:
     void clearImageSelection();
 
     void recomputePages();
+    // Draw one page's static content (text + search highlights), through the
+    // cache when possible. Caret and selection are drawn by the caller on top,
+    // so they never get baked into a cached pixmap.
+    void drawPageContent(QPainter *painter, int page, const QRectF &textRect,
+                         const QRectF &exposed);
     void recomputeSearchMatches();
     void setCursorAndNotify(const QTextCursor &cursor);
     void afterCursorMoved();        // re-sync typing format from cursor + notify

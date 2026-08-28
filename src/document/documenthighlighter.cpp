@@ -1,5 +1,6 @@
 #include "document/documenthighlighter.h"
 
+#include <QTextBlock>
 #include <QTextDocument>
 
 #include "util/spellchecker.h"
@@ -97,8 +98,34 @@ void DocumentHighlighter::setSpellChecker(SpellChecker *checker)
     SpellChecker *usable = (checker && checker->isAvailable()) ? checker : nullptr;
     if (m_spell == usable)
         return;
+    const bool hadSpelling = m_spell != nullptr;
     m_spell = usable;
-    rehighlight();
+    if (hadSpelling && !usable) {
+        rehighlight();                 // turning it off must clear the underlines
+        return;
+    }
+    // Turning it on only needs to cover what is currently on screen.
+    const int from = m_spellFrom;
+    const int to = m_spellTo;
+    m_spellTo = -1;
+    setSpellRange(from, to);
+}
+
+void DocumentHighlighter::setSpellRange(int from, int to)
+{
+    if (from == m_spellFrom && to == m_spellTo)
+        return;
+    m_spellFrom = from;
+    m_spellTo = to;
+    if (!spellCheckingActive() || to < from || !document())
+        return;
+    // Only the blocks that just came into range need re-examining; ones already
+    // checked keep the formats they have.
+    QTextBlock b = document()->findBlock(from);
+    while (b.isValid() && b.position() <= to) {
+        rehighlightBlock(b);
+        b = b.next();
+    }
 }
 
 bool DocumentHighlighter::spellCheckingActive() const
@@ -134,7 +161,11 @@ void DocumentHighlighter::markMisspellings(const QString &text)
 void DocumentHighlighter::highlightBlock(const QString &text)
 {
     if (spellCheckingActive()) {
-        markMisspellings(text);
+        // Outside the on-screen range, leave the block unmarked; it gets
+        // checked when it scrolls into view.
+        const int pos = currentBlock().position();
+        if (m_spellTo >= m_spellFrom && pos + text.size() >= m_spellFrom && pos <= m_spellTo)
+            markMisspellings(text);
         return;
     }
     if (m_lang == Language::None || m_rules.isEmpty())
