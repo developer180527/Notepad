@@ -89,6 +89,7 @@
 #include <cmath>
 
 QList<MainWindow *> MainWindow::s_windows;
+QStringList MainWindow::s_closedTabs;
 DocumentView *MainWindow::s_dragDoc = nullptr;
 MainWindow *MainWindow::s_dragSource = nullptr;
 
@@ -147,6 +148,7 @@ MainWindow::MainWindow(bool withInitialDocument, QWidget *parent)
     setupToolBar();
     setupStatusBar();
     connectActions();
+    applyShortcuts();
     setupShortcutFeedback();
     refreshIcons();
 
@@ -425,7 +427,8 @@ void MainWindow::setupStatusBar()
 void MainWindow::setupShortcutFeedback()
 {
     const QList<QMenu *> menus = {ui->menuFile, ui->menuEdit, ui->menuInsert,
-                                  ui->menuFormat, ui->menuView, ui->menuHelp};
+                                  ui->menuFormat, ui->menuView, ui->menuWindow,
+                                  ui->menuHelp};
     for (QMenu *menu : menus) {
         QAction *title = menu->menuAction();
         for (QAction *a : menu->actions()) {
@@ -526,6 +529,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
             }
         }
     }
+    for (int i = 0; i < m_stack->count(); ++i)
+        rememberClosedTab(documentAt(i));
     QSettings().setValue(QStringLiteral("ui/geometry"), saveGeometry());
     event->accept();
 }

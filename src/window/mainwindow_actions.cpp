@@ -4,6 +4,7 @@
 // responsibility; see mainwindow.h for the class definition.
 
 #include "window/mainwindow.h"
+#include "window/keymap.h"
 #include "widgets/settingsdialog.h"
 #include "ui_mainwindow.h"
 #include "widgets/canvasview.h"
@@ -89,6 +90,23 @@
 #endif
 #include <cmath>
 
+// Install the platform keymap. Actions are found by object name, so the table
+// in window/keymap.cpp is the one place shortcuts are defined.
+void MainWindow::applyShortcuts()
+{
+    for (const auto &entry : Keymap::table(Keymap::current())) {
+        QAction *action = findChild<QAction *>(entry.first);
+        if (!action) {
+            qWarning("Keymap names an action that does not exist: %s", qPrintable(entry.first));
+            continue;
+        }
+        QList<QKeySequence> keys;
+        for (const QString &k : entry.second)
+            keys << QKeySequence(k, QKeySequence::PortableText);
+        action->setShortcuts(keys);
+    }
+}
+
 void MainWindow::connectActions()
 {
     // File
@@ -101,27 +119,38 @@ void MainWindow::connectActions()
     connect(ui->actionPrint, &QAction::triggered, this, &MainWindow::printDocument);
     connect(ui->actionShowInFolder, &QAction::triggered, this,
             [this] { showInFolder(m_doc); });
-    connect(ui->actionShowInFolder, &QAction::triggered, this,
-            [this] { showInFolder(m_doc); });
     connect(ui->actionSettings, &QAction::triggered, this, [this] {
         SettingsDialog(this).exec();
     });
-    connect(ui->actionQuit, &QAction::triggered, this, &QWidget::close);
-    connect(ui->actionCloseTab, &QAction::triggered, this,
-            [this] { closeDocumentAt(m_tabs->currentIndex()); });
+    // Quit closes every window (each prompting for its unsaved tabs) and stops
+    // at the first one that is cancelled — not just the window in front.
+    connect(ui->actionQuit, &QAction::triggered, qApp, &QApplication::closeAllWindows);
 
-    // Tab cycling. Not in a menu — these are muscle-memory shortcuts.
-    ui->actionNextTab->setShortcuts({QKeySequence(QStringLiteral("Ctrl+Tab")),
-                                     QKeySequence(QStringLiteral("Ctrl+PgDown"))});
-    ui->actionPrevTab->setShortcuts({QKeySequence(QStringLiteral("Ctrl+Shift+Tab")),
-                                     QKeySequence(QStringLiteral("Ctrl+PgUp"))});
-    addAction(ui->actionNextTab);
-    addAction(ui->actionPrevTab);
+    // Windows and tabs
+    connect(ui->actionNewWindow, &QAction::triggered, this, [this] { createWindowFrom(this); });
+    connect(ui->actionCloseTab, &QAction::triggered, this, &MainWindow::closeCurrentTab);
+    connect(ui->actionCloseWindow, &QAction::triggered, this, &QWidget::close);
+    connect(ui->actionReopenClosedTab, &QAction::triggered, this, &MainWindow::reopenClosedTab);
+    connect(ui->actionMinimize, &QAction::triggered, this, &QWidget::showMinimized);
+    connect(ui->actionFullScreen, &QAction::triggered, this, [this] {
+        if (isFullScreen())
+            showNormal();
+        else
+            showFullScreen();
+    });
+    connect(ui->actionMoveTabToNewWindow, &QAction::triggered, this, [this] {
+        if (m_doc)
+            detachToNewWindow(m_doc, frameGeometry().topLeft() + QPoint(110, 50));
+    });
+    // Minimise has no Windows/Linux shortcut and lives in the title bar there.
+    if (Keymap::current() != Keymap::Platform::Mac)
+        ui->actionMinimize->setVisible(false);
 
-    // Ctrl/Cmd+1..8 select that tab; 9 always means "last", as in browsers.
+    // ⌘1…⌘9. Not in a menu, so they are added to the window directly; the
+    // keymap assigns their keys by object name.
     for (int i = 1; i <= 9; ++i) {
         auto *jump = new QAction(this);
-        jump->setShortcut(QKeySequence(QStringLiteral("Ctrl+%1").arg(i)));
+        jump->setObjectName(QStringLiteral("actionSelectTab%1").arg(i));
         connect(jump, &QAction::triggered, this, [this, i] {
             const int target = (i == 9) ? m_tabs->count() - 1 : i - 1;
             if (target >= 0 && target < m_tabs->count())
@@ -150,6 +179,11 @@ void MainWindow::connectActions()
     connect(ui->actionCopy, &QAction::triggered, this, onEditor(&PageDocumentItem::copy));
     connect(ui->actionPaste, &QAction::triggered, this, onEditor(&PageDocumentItem::paste));
     connect(ui->actionSelectAll, &QAction::triggered, this, onEditor(&PageDocumentItem::selectAll));
+    connect(ui->actionPasteMatchStyle, &QAction::triggered, this,
+            onEditor(&PageDocumentItem::pastePlainText));
+    connect(ui->actionFindNext, &QAction::triggered, this, [this] { m_findBar->findNext(); });
+    connect(ui->actionFindPrevious, &QAction::triggered, this, [this] { m_findBar->findPrevious(); });
+    connect(ui->actionReplace, &QAction::triggered, this, [this] { m_findBar->activateReplace(); });
 
     ui->actionUndo->setEnabled(false);
     ui->actionRedo->setEnabled(false);
@@ -216,10 +250,6 @@ void MainWindow::connectActions()
         fmt.setFontUnderline(on);
         mergeFormatOnSelection(fmt);
     });
-    // Ctrl/Cmd +/- change the font size (= and + both work for increase).
-    ui->actionIncreaseFontSize->setShortcuts(
-        {QKeySequence(QStringLiteral("Ctrl+=")), QKeySequence(QStringLiteral("Ctrl++"))});
-    ui->actionDecreaseFontSize->setShortcut(QKeySequence(QStringLiteral("Ctrl+-")));
     connect(ui->actionIncreaseFontSize, &QAction::triggered, this, [this] { changeFontSize(+1); });
     connect(ui->actionDecreaseFontSize, &QAction::triggered, this, [this] { changeFontSize(-1); });
 

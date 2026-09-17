@@ -16,6 +16,13 @@ public:
 
     void activate();          // show, focus and select the find field
     void dismiss();           // hide and notify (close button, Esc, Ctrl/Cmd+F toggle)
+    void activateReplace();   // show with the replace field ready
+
+    // Find Next / Find Previous (⌘G / F3). These work with the bar closed, using
+    // the last search, as in every editor; with nothing searched yet they open
+    // the bar instead.
+    void findNext();
+    void findPrevious();
 
 signals:
     // Emitted live as the find text / options change, for highlighting all matches.

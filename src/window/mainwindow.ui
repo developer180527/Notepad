@@ -18,13 +18,17 @@
    <widget class="QMenu" name="menuFile">
     <property name="title"><string>&amp;File</string></property>
     <addaction name="actionNew"/>
+    <addaction name="actionNewWindow"/>
     <addaction name="actionOpen"/>
+    <addaction name="separator"/>
     <addaction name="actionSave"/>
     <addaction name="actionSaveAs"/>
     <addaction name="separator"/>
+    <addaction name="actionReopenClosedTab"/>
     <addaction name="actionShowInFolder"/>
     <addaction name="separator"/>
     <addaction name="actionCloseTab"/>
+    <addaction name="actionCloseWindow"/>
     <addaction name="separator"/>
     <addaction name="actionPageSetup"/>
     <addaction name="actionPrint"/>
@@ -43,10 +47,14 @@
     <addaction name="actionCut"/>
     <addaction name="actionCopy"/>
     <addaction name="actionPaste"/>
+    <addaction name="actionPasteMatchStyle"/>
     <addaction name="separator"/>
     <addaction name="actionSelectAll"/>
     <addaction name="separator"/>
     <addaction name="actionFind"/>
+    <addaction name="actionFindNext"/>
+    <addaction name="actionFindPrevious"/>
+    <addaction name="actionReplace"/>
    </widget>
    <widget class="QMenu" name="menuInsert">
     <property name="title"><string>&amp;Insert</string></property>
@@ -81,6 +89,15 @@
     <addaction name="separator"/>
     <addaction name="actionMarkdownSource"/>
    </widget>
+   <widget class="QMenu" name="menuWindow">
+    <property name="title"><string>&amp;Window</string></property>
+    <addaction name="actionMinimize"/>
+    <addaction name="actionFullScreen"/>
+    <addaction name="separator"/>
+    <addaction name="actionNextTab"/>
+    <addaction name="actionPrevTab"/>
+    <addaction name="actionMoveTabToNewWindow"/>
+   </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title"><string>&amp;Help</string></property>
     <addaction name="actionAbout"/>
@@ -91,24 +108,52 @@
    <addaction name="menuInsert"/>
    <addaction name="menuFormat"/>
    <addaction name="menuView"/>
+   <addaction name="menuWindow"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionNewWindow">
+   <property name="text"><string>New &amp;Window</string></property>
+  </action>
+  <action name="actionReopenClosedTab">
+   <property name="text"><string>&amp;Reopen Closed Tab</string></property>
+  </action>
+  <action name="actionCloseWindow">
+   <property name="text"><string>Close &amp;Window</string></property>
+  </action>
+  <action name="actionPasteMatchStyle">
+   <property name="text"><string>Paste and &amp;Match Style</string></property>
+  </action>
+  <action name="actionFindNext">
+   <property name="text"><string>Find &amp;Next</string></property>
+  </action>
+  <action name="actionFindPrevious">
+   <property name="text"><string>Find Pre&amp;vious</string></property>
+  </action>
+  <action name="actionReplace">
+   <property name="text"><string>&amp;Replace...</string></property>
+  </action>
+  <action name="actionMinimize">
+   <property name="text"><string>&amp;Minimize</string></property>
+  </action>
+  <action name="actionFullScreen">
+   <property name="text"><string>Enter &amp;Full Screen</string></property>
+   <property name="checkable"><bool>true</bool></property>
+  </action>
+  <action name="actionMoveTabToNewWindow">
+   <property name="text"><string>Move Tab to New &amp;Window</string></property>
+  </action>
   <action name="actionNew">
-   <property name="text"><string>&amp;New</string></property>
-   <property name="shortcut"><string>Ctrl+N</string></property>
+   <property name="text"><string>New &amp;Tab</string></property>
   </action>
   <action name="actionOpen">
    <property name="text"><string>&amp;Open...</string></property>
-   <property name="shortcut"><string>Ctrl+O</string></property>
   </action>
   <action name="actionSave">
    <property name="text"><string>&amp;Save</string></property>
-   <property name="shortcut"><string>Ctrl+S</string></property>
   </action>
   <action name="actionSaveAs">
    <property name="text"><string>Save &amp;As...</string></property>
-   <property name="shortcut"><string>Ctrl+Shift+S</string></property>
   </action>
   <action name="actionShowInFolder">
    <property name="text"><string>Show in &amp;Folder</string></property>
@@ -116,24 +161,21 @@
   </action>
   <action name="actionCloseTab">
    <property name="text"><string>&amp;Close Tab</string></property>
-   <property name="shortcut"><string>Ctrl+W</string></property>
   </action>
   <action name="actionNextTab">
-   <property name="text"><string>Next Tab</string></property>
+   <property name="text"><string>Show &amp;Next Tab</string></property>
   </action>
   <action name="actionPrevTab">
-   <property name="text"><string>Previous Tab</string></property>
+   <property name="text"><string>Show &amp;Previous Tab</string></property>
   </action>
   <action name="actionPrint">
    <property name="text"><string>&amp;Print...</string></property>
-   <property name="shortcut"><string>Ctrl+P</string></property>
   </action>
   <action name="actionExportPdf">
    <property name="text"><string>Export as &amp;PDF...</string></property>
   </action>
   <action name="actionConvert">
    <property name="text"><string>Con&amp;vert / Export As...</string></property>
-   <property name="shortcut"><string>Ctrl+Shift+E</string></property>
    <property name="toolTip"><string>Save a copy of this document in another format</string></property>
   </action>
   <action name="actionPageSetup">
@@ -141,40 +183,31 @@
   </action>
   <action name="actionFind">
    <property name="text"><string>&amp;Find / Replace...</string></property>
-   <property name="shortcut"><string>Ctrl+F</string></property>
   </action>
   <action name="actionSettings">
    <property name="text"><string>Se&amp;ttings...</string></property>
-   <property name="shortcut"><string>Ctrl+,</string></property>
    <property name="menuRole"><enum>QAction::PreferencesRole</enum></property>
   </action>
   <action name="actionQuit">
    <property name="text"><string>&amp;Quit</string></property>
-   <property name="shortcut"><string>Ctrl+Q</string></property>
   </action>
   <action name="actionUndo">
    <property name="text"><string>&amp;Undo</string></property>
-   <property name="shortcut"><string>Ctrl+Z</string></property>
   </action>
   <action name="actionRedo">
    <property name="text"><string>&amp;Redo</string></property>
-   <property name="shortcut"><string>Ctrl+Shift+Z</string></property>
   </action>
   <action name="actionCut">
    <property name="text"><string>Cu&amp;t</string></property>
-   <property name="shortcut"><string>Ctrl+X</string></property>
   </action>
   <action name="actionCopy">
    <property name="text"><string>&amp;Copy</string></property>
-   <property name="shortcut"><string>Ctrl+C</string></property>
   </action>
   <action name="actionPaste">
    <property name="text"><string>&amp;Paste</string></property>
-   <property name="shortcut"><string>Ctrl+V</string></property>
   </action>
   <action name="actionSelectAll">
    <property name="text"><string>Select &amp;All</string></property>
-   <property name="shortcut"><string>Ctrl+A</string></property>
   </action>
   <action name="actionInsertImage">
    <property name="text"><string>&amp;Image...</string></property>
@@ -184,37 +217,30 @@
   </action>
   <action name="actionBold">
    <property name="text"><string>&amp;Bold</string></property>
-   <property name="shortcut"><string>Ctrl+B</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionItalic">
    <property name="text"><string>&amp;Italic</string></property>
-   <property name="shortcut"><string>Ctrl+I</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionUnderline">
    <property name="text"><string>&amp;Underline</string></property>
-   <property name="shortcut"><string>Ctrl+U</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionAlignLeft">
    <property name="text"><string>Align &amp;Left</string></property>
-   <property name="shortcut"><string>Ctrl+L</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionAlignCenter">
    <property name="text"><string>Align &amp;Center</string></property>
-   <property name="shortcut"><string>Ctrl+E</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionAlignRight">
    <property name="text"><string>Align &amp;Right</string></property>
-   <property name="shortcut"><string>Ctrl+R</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionAlignJustify">
    <property name="text"><string>&amp;Justify</string></property>
-   <property name="shortcut"><string>Ctrl+J</string></property>
    <property name="checkable"><bool>true</bool></property>
   </action>
   <action name="actionTextColor">
@@ -237,7 +263,6 @@
   </action>
   <action name="actionResetZoom">
    <property name="text"><string>&amp;Reset Zoom</string></property>
-   <property name="shortcut"><string>Ctrl+0</string></property>
   </action>
   <action name="actionShowRuler">
    <property name="text"><string>Show &amp;Ruler</string></property>
@@ -252,7 +277,6 @@
   <action name="actionMarkdownSource">
    <property name="text"><string>Markdown &amp;Source</string></property>
    <property name="checkable"><bool>true</bool></property>
-   <property name="shortcut"><string>Ctrl+Shift+M</string></property>
    <property name="toolTip"><string>Show the raw Markdown text instead of the formatted document</string></property>
   </action>
   <action name="actionAbout">

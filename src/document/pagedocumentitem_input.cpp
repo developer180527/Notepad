@@ -40,31 +40,138 @@
 #include <QUrl>
 #include <cmath>
 
-void PageDocumentItem::keyPressEvent(QKeyEvent *event)
+// Caret movement and deletion by the platform's own conventions.
+//
+// Rather than inspecting modifiers by hand, every navigation key is matched
+// against QKeySequence's standard keys, which Qt maps per platform. That is what
+// makes ⌘← go to the start of the line and ⌥← to the previous word on a Mac,
+// while Home and Ctrl+← do those jobs on Windows and Linux — including the
+// Emacs-style ⌃A / ⌃E / ⌃K that Mac text fields honour.
+bool PageDocumentItem::handleEditingKey(QKeyEvent *event)
 {
-    const bool shift = event->modifiers() & Qt::ShiftModifier;
-    const bool ctrl = event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier);
-    const QTextCursor::MoveMode mode = shift ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor;
+    using SK = QKeySequence::StandardKey;
+    using Op = QTextCursor::MoveOperation;
 
-    auto move = [&](QTextCursor::MoveOperation op) {
-        m_cursor.movePosition(op, mode);
-        afterCursorMoved();
-        event->accept();
+    struct Move { SK key; Op op; bool select; };
+    static const Move moves[] = {
+        {QKeySequence::MoveToNextChar,          QTextCursor::Right,        false},
+        {QKeySequence::MoveToPreviousChar,      QTextCursor::Left,         false},
+        {QKeySequence::MoveToNextWord,          QTextCursor::WordRight,    false},
+        {QKeySequence::MoveToPreviousWord,      QTextCursor::WordLeft,     false},
+        {QKeySequence::MoveToNextLine,          QTextCursor::Down,         false},
+        {QKeySequence::MoveToPreviousLine,      QTextCursor::Up,           false},
+        {QKeySequence::MoveToStartOfLine,       QTextCursor::StartOfLine,  false},
+        {QKeySequence::MoveToEndOfLine,         QTextCursor::EndOfLine,    false},
+        {QKeySequence::MoveToStartOfBlock,      QTextCursor::StartOfBlock, false},
+        {QKeySequence::MoveToEndOfBlock,        QTextCursor::EndOfBlock,   false},
+        {QKeySequence::MoveToStartOfDocument,   QTextCursor::Start,        false},
+        {QKeySequence::MoveToEndOfDocument,     QTextCursor::End,          false},
+        {QKeySequence::SelectNextChar,          QTextCursor::Right,        true},
+        {QKeySequence::SelectPreviousChar,      QTextCursor::Left,         true},
+        {QKeySequence::SelectNextWord,          QTextCursor::WordRight,    true},
+        {QKeySequence::SelectPreviousWord,      QTextCursor::WordLeft,     true},
+        {QKeySequence::SelectNextLine,          QTextCursor::Down,         true},
+        {QKeySequence::SelectPreviousLine,      QTextCursor::Up,           true},
+        {QKeySequence::SelectStartOfLine,       QTextCursor::StartOfLine,  true},
+        {QKeySequence::SelectEndOfLine,         QTextCursor::EndOfLine,    true},
+        {QKeySequence::SelectStartOfBlock,      QTextCursor::StartOfBlock, true},
+        {QKeySequence::SelectEndOfBlock,        QTextCursor::EndOfBlock,   true},
+        {QKeySequence::SelectStartOfDocument,   QTextCursor::Start,        true},
+        {QKeySequence::SelectEndOfDocument,     QTextCursor::End,          true},
     };
 
+    for (const Move &m : moves) {
+        if (!event->matches(m.key))
+            continue;
+        const auto mode = m.select ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor;
+
+        // With a selection, a plain ← or → collapses it to that edge instead of
+        // moving one character past it — the same on every platform.
+        if (!m.select && m_cursor.hasSelection()
+            && (m.op == QTextCursor::Left || m.op == QTextCursor::Right)) {
+            const int edge = m.op == QTextCursor::Left ? m_cursor.selectionStart()
+                                                       : m_cursor.selectionEnd();
+            m_cursor.setPosition(edge);
+            afterCursorMoved();
+            return true;
+        }
+
+#if defined(Q_OS_MACOS)
+        // ⌥→ lands at the *end* of the word on a Mac, not the start of the next.
+        if (m.op == QTextCursor::WordRight) {
+            const int before = m_cursor.position();
+            m_cursor.movePosition(QTextCursor::EndOfWord, mode);
+            if (m_cursor.position() == before) {
+                m_cursor.movePosition(QTextCursor::NextWord, mode);
+                m_cursor.movePosition(QTextCursor::EndOfWord, mode);
+            }
+            afterCursorMoved();
+            return true;
+        }
+#endif
+        m_cursor.movePosition(m.op, mode);
+        afterCursorMoved();
+        return true;
+    }
+
+    // Page Up / Page Down (and their selecting forms).
+    const bool pageDown = event->matches(QKeySequence::MoveToNextPage);
+    const bool pageUp = event->matches(QKeySequence::MoveToPreviousPage);
+    const bool selPageDown = event->matches(QKeySequence::SelectNextPage);
+    const bool selPageUp = event->matches(QKeySequence::SelectPreviousPage);
+    if (pageDown || pageUp || selPageDown || selPageUp) {
+        const auto mode = (selPageDown || selPageUp) ? QTextCursor::KeepAnchor
+                                                     : QTextCursor::MoveAnchor;
+        const auto op = (pageDown || selPageDown) ? QTextCursor::Down : QTextCursor::Up;
+        for (int i = 0; i < 20; ++i)
+            m_cursor.movePosition(op, mode);
+        afterCursorMoved();
+        return true;
+    }
+
+    // Deletion by word or line: ⌥⌫ / Ctrl+Backspace, ⌥⌦ / Ctrl+Del, ⌃K.
+    auto deleteTo = [this](QTextCursor::MoveOperation op) {
+        if (m_cursor.hasSelection()) {
+            m_cursor.removeSelectedText();
+        } else {
+            QTextCursor c = m_cursor;
+            c.movePosition(op, QTextCursor::KeepAnchor);
+            c.removeSelectedText();
+            m_cursor = c;
+        }
+        afterCursorMoved();
+    };
+    if (event->matches(QKeySequence::DeleteStartOfWord)) { deleteTo(QTextCursor::PreviousWord); return true; }
+    if (event->matches(QKeySequence::DeleteEndOfWord))   { deleteTo(QTextCursor::NextWord);     return true; }
+    if (event->matches(QKeySequence::DeleteEndOfLine))   { deleteTo(QTextCursor::EndOfLine);    return true; }
+    if (event->matches(QKeySequence::DeleteCompleteLine)) {
+        m_cursor.movePosition(QTextCursor::StartOfLine);
+        m_cursor.movePosition(QTextCursor::EndOfLine, QTextCursor::KeepAnchor);
+        m_cursor.removeSelectedText();
+        afterCursorMoved();
+        return true;
+    }
+#if defined(Q_OS_MACOS)
+    // ⌘⌫ deletes back to the start of the line. Qt has no standard key for it.
+    if (event->key() == Qt::Key_Backspace && (event->modifiers() & Qt::ControlModifier)) {
+        deleteTo(QTextCursor::StartOfLine);
+        return true;
+    }
+#endif
+    return false;
+}
+
+void PageDocumentItem::keyPressEvent(QKeyEvent *event)
+{
+    if (handleEditingKey(event)) {
+        event->accept();
+        return;
+    }
+
+    const Qt::KeyboardModifiers mods = event->modifiers();
+    const bool shift = mods & Qt::ShiftModifier;
+
     switch (event->key()) {
-    case Qt::Key_Left:  move(ctrl ? QTextCursor::WordLeft : QTextCursor::Left); return;
-    case Qt::Key_Right: move(ctrl ? QTextCursor::WordRight : QTextCursor::Right); return;
-    case Qt::Key_Up:    move(QTextCursor::Up); return;
-    case Qt::Key_Down:  move(QTextCursor::Down); return;
-    case Qt::Key_Home:  move(ctrl ? QTextCursor::Start : QTextCursor::StartOfLine); return;
-    case Qt::Key_End:   move(ctrl ? QTextCursor::End : QTextCursor::EndOfLine); return;
-    case Qt::Key_PageUp:
-        for (int i = 0; i < 20; ++i) m_cursor.movePosition(QTextCursor::Up, mode);
-        afterCursorMoved(); event->accept(); return;
-    case Qt::Key_PageDown:
-        for (int i = 0; i < 20; ++i) m_cursor.movePosition(QTextCursor::Down, mode);
-        afterCursorMoved(); event->accept(); return;
     case Qt::Key_Backspace:
         if (m_cursor.hasSelection()) m_cursor.removeSelectedText();
         else m_cursor.deletePreviousChar();
@@ -105,7 +212,15 @@ void PageDocumentItem::keyPressEvent(QKeyEvent *event)
         break;
     }
 
-    if (!ctrl && !event->text().isEmpty() && event->text().at(0).isPrint()) {
+    // Typing. A command modifier (⌘ or ⌃ on a Mac, Ctrl on Windows/Linux) means
+    // "shortcut", not text — except for AltGr, which Windows reports as Ctrl+Alt
+    // and which is how many keyboard layouts type @, €, [ and friends.
+    bool command = mods & (Qt::ControlModifier | Qt::MetaModifier);
+#if defined(Q_OS_WIN)
+    if ((mods & Qt::ControlModifier) && (mods & Qt::AltModifier))
+        command = false;
+#endif
+    if (!command && !event->text().isEmpty() && event->text().at(0).isPrint()) {
         m_cursor.insertText(event->text(), m_typingFormat);
         afterCursorMoved();
         event->accept();

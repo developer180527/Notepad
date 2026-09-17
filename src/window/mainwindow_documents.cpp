@@ -19,6 +19,7 @@
 #include "widgets/rulerwidget.h"
 #include <QActionGroup>
 #include <QApplication>
+#include <QScreen>
 #include <QBuffer>
 #include <QCloseEvent>
 #include <QColorDialog>
@@ -242,6 +243,7 @@ bool MainWindow::closeDocumentAt(int index)
     if (!maybeSaveDocument(doc))
         return false;
 
+    rememberClosedTab(doc);
     m_stack->removeWidget(doc);
     m_tabs->removeTab(index);
     doc->deleteLater();
@@ -328,6 +330,89 @@ void MainWindow::detachToNewWindow(DocumentView *doc, const QPoint &globalPos)
 MainWindow *MainWindow::createWindowForAdoption()
 {
     return new MainWindow(false, nullptr);
+}
+
+MainWindow *MainWindow::createWindowFrom(MainWindow *source)
+{
+    // Built without restoring saved geometry: restoreGeometry() also restores the
+    // saved maximised/full-screen *state*, which Qt re-applies on show() and
+    // would override the size taken from the source window.
+    MainWindow *w = createWindowForAdoption();
+    w->addDocument();
+    w->setZoom(100);
+
+    if (!source) {
+        w->show();
+        return w;
+    }
+    if (source->isMaximized() || source->isFullScreen()) {
+        w->resize(source->normalGeometry().size());
+        w->showMaximized();
+        return w;
+    }
+
+    // Cascade down and to the right of the source, and wrap back to the top-left
+    // of the screen rather than opening a window that hangs off its edge.
+    constexpr int kCascade = 28;
+    QRect frame(source->frameGeometry().topLeft() + QPoint(kCascade, kCascade),
+                source->frameGeometry().size());
+    if (QScreen *screen = source->screen()) {
+        const QRect avail = screen->availableGeometry();
+        if (!avail.contains(frame))
+            frame.moveTopLeft(avail.topLeft() + QPoint(kCascade, kCascade));
+    }
+    w->resize(source->size());
+    w->move(frame.topLeft());
+    w->show();
+    w->raise();
+    w->activateWindow();
+    return w;
+}
+
+// Closed tabs are remembered by file. An untitled document has no file to go
+// back to, and one closed with "Don't Save" was discarded on purpose.
+void MainWindow::rememberClosedTab(DocumentView *doc)
+{
+    if (!doc || doc->filePath().isEmpty())
+        return;
+    const QString path = QFileInfo(doc->filePath()).absoluteFilePath();
+    s_closedTabs.removeAll(path);
+    s_closedTabs.append(path);
+    constexpr int kMaxRemembered = 25;
+    while (s_closedTabs.size() > kMaxRemembered)
+        s_closedTabs.removeFirst();
+}
+
+void MainWindow::reopenClosedTab()
+{
+    // Skip anything that has since been deleted or moved, or is already open.
+    while (!s_closedTabs.isEmpty()) {
+        const QString path = s_closedTabs.takeLast();
+        if (!QFileInfo::exists(path))
+            continue;
+        bool alreadyOpen = false;
+        for (MainWindow *w : std::as_const(s_windows))
+            if (w->indexOfFile(path) >= 0)
+                alreadyOpen = true;
+        if (alreadyOpen)
+            continue;
+        openPath(path);
+        return;
+    }
+    statusBar()->showMessage(tr("No recently closed tabs to reopen."), 2500);
+}
+
+// ⌘W closes the tab. When the window is down to a single untouched, untitled
+// tab there is nothing left to close but the window itself — the same rule VS
+// Code uses, so repeated ⌘W empties a window and then closes it.
+void MainWindow::closeCurrentTab()
+{
+    if (m_stack->count() == 1 && m_doc && m_doc->filePath().isEmpty()
+        && !m_doc->isModified() && m_doc->document()->isEmpty()) {
+        close();
+        return;
+    }
+    closeDocumentAt(m_tabs->currentIndex());
 }
 
 MainWindow *MainWindow::createWindow()

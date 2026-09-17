@@ -85,6 +85,31 @@ void FindBar::activate()
     m_find->selectAll();
 }
 
+void FindBar::activateReplace()
+{
+    show();
+    // Nothing to replace until there is something to find.
+    QLineEdit *field = m_find->text().isEmpty() ? m_find : m_replace;
+    field->setFocus();
+    field->selectAll();
+}
+
+void FindBar::findNext()
+{
+    if (m_find->text().isEmpty())
+        activate();
+    else
+        emitFind(true);
+}
+
+void FindBar::findPrevious()
+{
+    if (m_find->text().isEmpty())
+        activate();
+    else
+        emitFind(false);
+}
+
 void FindBar::dismiss()
 {
     hide();

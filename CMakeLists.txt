@@ -33,6 +33,8 @@ qt_add_executable(Notepad
     src/window/mainwindow_fileops.cpp
     src/window/mainwindow_format.cpp
     src/window/mainwindow_view.cpp
+    src/window/keymap.h
+    src/window/keymap.cpp
 
     # document/ — an open document: its model, paginated rendering and file I/O
     src/document/documentview.h

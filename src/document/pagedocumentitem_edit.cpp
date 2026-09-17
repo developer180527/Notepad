@@ -197,6 +197,17 @@ void PageDocumentItem::cut()
     afterCursorMoved();
 }
 
+// Paste and Match Style: drop the source formatting and take on the style of
+// the text around the caret.
+void PageDocumentItem::pastePlainText()
+{
+    const QMimeData *mime = QApplication::clipboard()->mimeData();
+    if (!mime || !mime->hasText())
+        return;
+    m_cursor.insertText(mime->text(), m_typingFormat);
+    afterCursorMoved();
+}
+
 void PageDocumentItem::paste()
 {
     const QMimeData *mime = QApplication::clipboard()->mimeData();

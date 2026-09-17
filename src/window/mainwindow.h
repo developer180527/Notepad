@@ -7,6 +7,7 @@
 #include <QPageLayout>
 #include <QPageSize>
 #include <QString>
+#include <QStringList>
 #include <QList>
 
 class PageDocumentItem;
@@ -58,6 +59,10 @@ public:
     static void routeOpenPath(const QString &path);
     static MainWindow *mostRecentWindow();
 
+    // A new window with one empty tab, the same size as `source` and offset
+    // from it, the way ⌘N cascades in any Mac or Windows app.
+    static MainWindow *createWindowFrom(MainWindow *source);
+
     // Move a document here from another window (tab detach / merge, Phase 4).
     void adoptDocument(DocumentView *doc, int atIndex = -1);
     DocumentView *takeDocument(int index);      // detach without destroying
@@ -89,6 +94,10 @@ private:
     void registerDocument(DocumentView *doc);   // window-level bookkeeping hookups
     bool maybeSaveDocument(DocumentView *doc);       // save prompt for one document
     void connectActions();
+    void applyShortcuts();              // install the platform keymap (window/keymap.h)
+    void closeCurrentTab();             // ⌘W: close the tab, or the window if it is empty
+    void reopenClosedTab();             // ⇧⌘T
+    static void rememberClosedTab(DocumentView *doc);
     void setupShortcutFeedback();          // flash a menu when its shortcut fires
     void flashMenu(QAction *menuAction);
     void refreshIcons();
@@ -142,6 +151,9 @@ private:
 
     // Most-recently-activated first; used to pick a target for external opens.
     static QList<MainWindow *> s_windows;
+    // Files of recently closed tabs, most recent last, shared by every window so
+    // ⇧⌘T works wherever you are — including for tabs of a window you closed.
+    static QStringList s_closedTabs;
     // In-flight tab drag. Same-process only, so the document travels by pointer
     // and the mime data is just a marker.
     static DocumentView *s_dragDoc;

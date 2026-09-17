@@ -46,6 +46,7 @@ public:
     void cut();
     void copy();
     void paste();
+    void pastePlainText();      // Paste and Match Style: text only, in the typing format
     void selectAll();
     void mergeFormatOnSelection(const QTextCharFormat &format);
     void setAlignmentValue(Qt::Alignment alignment);
@@ -99,6 +100,7 @@ signals:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    bool handleEditingKey(QKeyEvent *event);   // platform navigation / deletion
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
