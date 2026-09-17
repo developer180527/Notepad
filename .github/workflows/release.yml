@@ -178,16 +178,25 @@ jobs:
           codesign "${OPTS[@]}" "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
+      # A designed installer window: background art, the app and an Applications
+      # alias placed either side of an arrow, and the volume icon. dmgbuild
+      # writes Finder's layout directly instead of driving Finder over
+      # AppleScript, which is unreliable on a headless runner.
       - name: Build DMG
         run: |
           set -euo pipefail
-          STAGE="$RUNNER_TEMP/dmg"
-          mkdir -p "$STAGE"
-          cp -R build/Notepad.app "$STAGE/"
-          ln -s /Applications "$STAGE/Applications"     # drag-to-install target
-          hdiutil create -volname "Notepad" -srcfolder "$STAGE" -ov \
-            -format UDZO -fs HFS+ Notepad-macos.dmg
+          python3 -m venv "$RUNNER_TEMP/dmgenv"
+          "$RUNNER_TEMP/dmgenv/bin/pip" install --quiet dmgbuild==1.6.7
+          # One TIFF carrying both 1x and 2x art, so Retina screens get it sharp.
+          tiffutil -cathidpicheck mac/dmg/background.png mac/dmg/background@2x.png \
+            -out "$RUNNER_TEMP/background.tiff"
+          "$RUNNER_TEMP/dmgenv/bin/dmgbuild" -s mac/dmg/settings.py \
+            -D app=build/Notepad.app \
+            -D background="$RUNNER_TEMP/background.tiff" \
+            -D icon=assets/notepad_icon.icns \
+            "Notepad" Notepad-macos.dmg
           hdiutil verify Notepad-macos.dmg
+          ls -lh Notepad-macos.dmg
 
       - name: Sign, notarize & staple DMG
         if: steps.signing.outputs.signed == 'true'
